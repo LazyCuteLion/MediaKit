@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0-windows;net462</TargetFrameworks>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>MediaKit.WPF</RootNamespace>
+    <FxcPath>$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'KitsRoot10', null, RegistryView.Registry64))bin\10.0.26100.0\x64\fxc.exe</FxcPath>
+
+    <!-- NuGet 元数据 -->
+    <PackageId>MediaKit.WPF</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>LazyCuteLion</Authors>
+    <Description>WPF shader effects library providing Alpha channel separation, 360 panoramic video projection, and video tiling effects via pixel shaders.</Description>
+    <PackageTags>WPF;ShaderEffect;Alpha;360Video;Panorama;Tile;PixelShader</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/LazyCuteLion/MediaKit</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/LazyCuteLion/MediaKit</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!-- HLSL 编译: .fx → .ps (ps_3_0) -->
+  <ItemGroup>
+    <HlslShader Include="Shaders\Alpha.fx" OutputName="Compiled\Alpha.ps" />
+    <HlslShader Include="Shaders\Tile.fx" OutputName="Compiled\Tile.ps" />
+    <HlslShader Include="Shaders\Pano.fx" OutputName="Compiled\Pano.ps" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" BeforeTargets="BeforeBuild" Inputs="@(HlslShader)" Outputs="@(HlslShader->'$(ProjectDir)Shaders\%(OutputName)')" Condition="Exists('$(FxcPath)')">
+    <Exec Command="&quot;$(FxcPath)&quot; /T ps_3_0 /E main /Fo &quot;$(ProjectDir)Shaders\%(HlslShader.OutputName)&quot; &quot;%(HlslShader.FullPath)&quot;" />
+  </Target>
+
+  <ItemGroup>
+    <Resource Include="Shaders\Compiled\Alpha.ps" />
+    <Resource Include="Shaders\Compiled\Tile.ps" />
+    <Resource Include="Shaders\Compiled\Pano.ps" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

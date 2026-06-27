@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>MediaKit.WinUI3</RootNamespace>
+    <UseWinUI>true</UseWinUI>
+    <Platforms>x64;ARM64</Platforms>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- NuGet 元数据 -->
+    <PackageId>MediaKit.WinUI3</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>LazyCuteLion</Authors>
+    <Description>360 panoramic video player control for WinUI 3, powered by Win2D PixelShaderEffect and Composition API.</Description>
+    <PackageTags>WinUI3;360Video;Panorama;VR;Win2D;MediaPlayer</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/LazyCuteLion/MediaKit</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/LazyCuteLion/MediaKit</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260209005" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+  </ItemGroup>
+
+  <!-- HLSL 着色器编译：构建前自动调用 fxc 生成 .cso -->
+  <PropertyGroup>
+    <FxcPath>$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'KitsRoot10', null, RegistryView.Registry64))bin\10.0.26100.0\x64\fxc.exe</FxcPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <HlslShader Include="Shaders\PanoProjection.hlsl" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" BeforeTargets="BeforeBuild" Inputs="@(HlslShader)" Outputs="@(HlslShader->'%(RootDir)%(Directory)Compiled\%(Filename).cso')">
+    <Exec Command="&quot;$(FxcPath)&quot; /T ps_4_0 /E main /O3 /Fo &quot;%(HlslShader.RootDir)%(HlslShader.Directory)Compiled\%(HlslShader.Filename).cso&quot; &quot;%(HlslShader.FullPath)&quot;" />
+  </Target>
+
+  <!-- 编译产物作为嵌入资源 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Shaders\Compiled\PanoProjection.cso" LogicalName="PanoProjection.cso" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

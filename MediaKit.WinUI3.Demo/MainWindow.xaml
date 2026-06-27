@@ -1,0 +1,159 @@
+<Window
+    x:Class="MediaKit.WinUI3.Demo.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:MediaKit.WinUI3.Demo"
+    xmlns:media="using:MediaKit.WinUI3"
+    Title="360 Video Player">
+
+    <!--  播放区全屏  -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <media:PanoMediaElement
+            x:Name="panoPlayer"
+            Grid.Row="0"
+            Grid.RowSpan="3"
+            AutoPlay="True"
+            Fov="{x:Bind sliderFov.Value, Mode=OneWay}"
+            PlaybackRate="{x:Bind sliderRate.Value, Mode=OneWay}"
+            Volume="{x:Bind sliderVolume.Value, Mode=OneWay}"
+            Zoom="{x:Bind sliderZoom.Value, Mode=OneWay}" />
+
+        <!--  进度条  -->
+        <Grid
+            Grid.Row="1"
+            Padding="12,4"
+            Background="#7DFFFFFF">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                Width="50"
+                VerticalAlignment="Center"
+                Text="{x:Bind local:TimeSpanToStringConverter.Format(panoPlayer.Position), Mode=OneWay}" />
+            <Slider
+                Grid.Column="1"
+                Maximum="100"
+                Minimum="0"
+                Value="{x:Bind panoPlayer.Progress, Mode=TwoWay}" />
+            <TextBlock
+                Grid.Column="2"
+                Width="50"
+                VerticalAlignment="Center"
+                Text="{x:Bind local:TimeSpanToStringConverter.Format(panoPlayer.Duration), Mode=OneWay}" />
+        </Grid>
+
+        <!--  控制栏  -->
+        <StackPanel
+            Grid.Row="2"
+            Padding="12,8"
+            Background="#7DFFFFFF"
+            Orientation="Horizontal"
+            Spacing="8">
+            <Button Click="BtnOpen_Click" Content="选择文件" />
+            <Button Command="{x:Bind panoPlayer.PlayCommand}" Content="播放" />
+            <Button Command="{x:Bind panoPlayer.PauseCommand}" Content="暂停" />
+            <Button Command="{x:Bind panoPlayer.StopCommand}" Content="停止" />
+            <Button Command="{x:Bind panoPlayer.ResetCommand}" Content="重置" />
+        </StackPanel>
+
+
+        <!--  右侧叠加属性面板  -->
+        <ScrollViewer
+            Grid.Row="0"
+            Width="260"
+            Padding="12,8"
+            HorizontalAlignment="Right"
+            Background="#7DFFFFFF"
+            VerticalAlignment="Top">
+            <StackPanel Spacing="12">
+
+                <!--  FOV  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="FOV" />
+                    <Slider
+                        x:Name="sliderFov"
+                        Maximum="150"
+                        Minimum="30"
+                        Value="90" />
+                </StackPanel>
+
+                <!--  Zoom  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Zoom" />
+                    <Slider
+                        x:Name="sliderZoom"
+                        Maximum="2.0"
+                        Minimum="0.1"
+                        StepFrequency="0.05"
+                        Value="0.5" />
+                </StackPanel>
+
+                <!--  RotationX  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="RotationX" />
+                    <Slider
+                        Maximum="1.0"
+                        Minimum="0.0"
+                        StepFrequency="0.01"
+                        Value="{x:Bind panoPlayer.RotationX, Mode=TwoWay}" />
+                </StackPanel>
+
+                <!--  RotationY  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="RotationY" />
+                    <Slider
+                        Maximum="1.0"
+                        Minimum="0.0"
+                        StepFrequency="0.01"
+                        Value="{x:Bind panoPlayer.RotationY, Mode=TwoWay}" />
+                </StackPanel>
+
+                <!--  Volume  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Volume" />
+                    <Slider
+                        x:Name="sliderVolume"
+                        Maximum="1.0"
+                        Minimum="0.0"
+                        StepFrequency="0.05"
+                        Value="1.0" />
+                </StackPanel>
+
+                <!--  PlaybackRate  -->
+                <StackPanel Spacing="2">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="PlaybackRate" />
+                    <Slider
+                        x:Name="sliderRate"
+                        Maximum="3.0"
+                        Minimum="0.25"
+                        StepFrequency="0.25"
+                        Value="1.0" />
+                </StackPanel>
+
+                <!--  开关  -->
+                <CheckBox Content="IsMuted" IsChecked="{Binding IsMuted, ElementName=panoPlayer, Mode=TwoWay}" />
+                <CheckBox Content="IsLooping" IsChecked="{Binding IsLooping, ElementName=panoPlayer, Mode=TwoWay}" />
+
+                <!--  只读信息  -->
+                <Border
+                    Margin="0,4"
+                    BorderBrush="{ThemeResource SystemControlForegroundBaseMediumLowBrush}"
+                    BorderThickness="0,1,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="Resolution:" />
+                    <TextBlock Text="{Binding NaturalVideoWidth, ElementName=panoPlayer}" />
+                    <TextBlock Text="×" />
+                    <TextBlock Text="{Binding NaturalVideoHeight, ElementName=panoPlayer}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
