@@ -6,8 +6,8 @@
 
 | 包名 | 平台 | 说明 |
 |------|------|------|
-| [MediaKit.WPF](MediaKit.WPF/) | WPF (.NET 8 / .NET Framework 4.6.2) | 基于 WPF ShaderEffect 的视频像素着色器效果库，提供 Alpha 通道分离、360 全景投影、视频平铺等效果 |
-| [MediaKit.WinUI3](MediaKit.WinUI3/) | WinUI 3 (.NET 8) | 基于 Win2D PixelShaderEffect + Composition API 的 360 全景视频播放控件 |
+| [MediaKit.WPF](MediaKit.WPF/) | WPF (.NET 8 / .NET Framework 4.6.2) | 基于 WPF ShaderEffect 的视频像素着色器效果库，提供Alpha通道合成、360全景投影、视频平铺、媒体进度绑定等功能 |
+| [MediaKit.WinUI3](MediaKit.WinUI3/) | WinUI 3 (.NET 8) | 基于 Win2D PixelShaderEffect + Composition API 的 360全景视频播放控件 |
 
 ## 快速开始
 
@@ -33,6 +33,10 @@ dotnet add package MediaKit.WinUI3
 
     <!-- 视频平铺 -->
     <MediaElement mk:TileEffect.IsEnabled="True" mk:TileEffect.Rows="2" mk:TileEffect.Columns="2" />
+
+    <!-- 媒体进度绑定 -->
+    <MediaElement x:Name="media" LoadedBehavior="Manual" mk:MediaBehavior.Interval="100" />
+    <Slider Value="{Binding (mk:MediaBehavior.Progress), ElementName=media}" Minimum="0" Maximum="100" />
 </Window>
 ```
 
