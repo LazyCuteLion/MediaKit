@@ -60,9 +60,9 @@ PanoEffect.Reset(mediaElement);
 (mediaElement.Effect as PanoEffect)?.Reset();
 ```
 
-### 2. AlphaEffect — Alpha 通道分离
+### 2. AlphaEffect — Alpha 通道合成
 
-将视频中并排/上下排列的 Alpha 通道信息分离合成，实现透明视频播放。
+将视频中水平/上下排列的 Alpha 通道信息进行合成，实现透明视频播放。
 
 ```xml
 <MediaElement Source="alpha_video.mp4"
@@ -74,7 +74,7 @@ PanoEffect.Reset(mediaElement);
 
 | 属性 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `IsEnabled` | bool | false | 是否启用 Alpha 分离效果 |
+| `IsEnabled` | bool | false | 是否启用 Alpha 合成效果 |
 | `Position` | Dock | Right | Alpha 通道位置（Left/Top/Right/Bottom） |
 
 ### 3. TileEffect — 视频平铺

@@ -33,7 +33,6 @@ xmlns:mk="using:MediaKit.WinUI3"
 
 ### PanoMediaElement — 360 全景视频播放器
 
-一个自包含的 WinUI 3 控件，集成了：
 - 等距柱状投影 → 球面透视投影（GPU 着色器实时渲染）
 - 鼠标拖拽旋转 + 惯性滑动
 - 滚轮缩放
