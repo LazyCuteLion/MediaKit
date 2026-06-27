@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 
 namespace MediaKit.WPF;
@@ -101,6 +103,9 @@ public class PanoEffect : ShaderEffect
     private double _velocityY;
     private bool _isInertiaRunning;
 
+    // 去重
+    private TimeSpan _lastRenderTime;
+
     private double _initialFov;
     private double _initialZoom;
     private double _initialRotationX;
@@ -145,6 +150,9 @@ public class PanoEffect : ShaderEffect
 
         if (element is MediaElement me)
             me.MediaOpened += OnMediaOpened;
+        else if (element is Image)
+            DependencyPropertyDescriptor.FromProperty(Image.SourceProperty, typeof(Image))
+                .AddValueChanged(element, OnImageSourceChanged);
 
         UpdateViewport();
     }
@@ -167,6 +175,9 @@ public class PanoEffect : ShaderEffect
 
         if (_element is MediaElement me)
             me.MediaOpened -= OnMediaOpened;
+        else if (_element is Image)
+            DependencyPropertyDescriptor.FromProperty(Image.SourceProperty, typeof(Image))
+                .RemoveValueChanged(_element, OnImageSourceChanged);
 
         _element = null;
     }
@@ -308,10 +319,18 @@ public class PanoEffect : ShaderEffect
     {
         if (_element == null) return;
 
+        // 过滤同一帧的重复触发
+        if (e is RenderingEventArgs args)
+        {
+            if (args.RenderingTime == _lastRenderTime) return;
+            _lastRenderTime = args.RenderingTime;
+        }
+
         var now = GetTick();
         var dt = Math.Max(1, now - _lastTick);
         _lastTick = now;
 
+        // 正常处理
         var moveX = _velocityX * dt;
         var moveY = _velocityY * dt;
 
@@ -344,6 +363,7 @@ public class PanoEffect : ShaderEffect
 
     private void OnParentSizeChanged(object sender, SizeChangedEventArgs e) => UpdateViewport();
     private void OnMediaOpened(object sender, RoutedEventArgs e) => UpdateViewport();
+    private void OnImageSourceChanged(object? sender, EventArgs e) => UpdateViewport();
 
     private void UpdateViewport()
     {
@@ -360,6 +380,11 @@ public class PanoEffect : ShaderEffect
         {
             videoW = me.NaturalVideoWidth;
             videoH = me.NaturalVideoHeight;
+        }
+        else if (_element is Image img && img.Source is BitmapSource bmp && bmp.PixelWidth > 0)
+        {
+            videoW = bmp.PixelWidth;
+            videoH = bmp.PixelHeight;
         }
 
         _element.Width = Math.Max(vpW, videoW);
