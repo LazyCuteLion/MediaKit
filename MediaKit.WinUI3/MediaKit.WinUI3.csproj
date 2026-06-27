@@ -32,7 +32,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <HlslShader Include="Shaders\PanoProjection.hlsl" />
+    <HlslShader Include="Shaders\Pano.hlsl" />
   </ItemGroup>
 
   <Target Name="CompileShaders" BeforeTargets="BeforeBuild" Inputs="@(HlslShader)" Outputs="@(HlslShader->'%(RootDir)%(Directory)Compiled\%(Filename).cso')">
@@ -41,7 +41,7 @@
 
   <!-- 编译产物作为嵌入资源 -->
   <ItemGroup>
-    <EmbeddedResource Include="Shaders\Compiled\PanoProjection.cso" LogicalName="PanoProjection.cso" />
+    <EmbeddedResource Include="Shaders\Compiled\Pano.cso" LogicalName="Pano.cso" />
   </ItemGroup>
 
   <ItemGroup>

@@ -360,7 +360,7 @@ public sealed class PanoMediaElement : Panel
     {
         // 从嵌入资源加载预编译着色器
         using (var stream = typeof(PanoMediaElement).Assembly
-            .GetManifestResourceStream("PanoProjection.cso"))
+            .GetManifestResourceStream("Pano.cso"))
         {
             if (stream != null)
             {
@@ -518,10 +518,9 @@ public sealed class PanoMediaElement : Panel
                 Source1 = _videoFrameBuffer,
                 Source1BorderMode = EffectBorderMode.Hard
             };
-            effect.Properties["params"] = new Vector4(
+            effect.Properties["panoParams"] = new Vector4(
                 (float)RotationX, (float)RotationY, (float)Zoom, (float)Fov);
-            effect.Properties["view"] = new Vector4(
-                1.0f, 1.0f, GetAspectRatio(), 0.0f);
+            effect.Properties["aspectRatio"] = GetAspectRatio();
 
             using var ds = CanvasComposition.CreateDrawingSession(_drawingSurface);
             ds.DrawImage(effect,
