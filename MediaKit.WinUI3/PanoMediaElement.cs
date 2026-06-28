@@ -41,12 +41,12 @@ public sealed class PanoMediaElement : Panel
     private int _videoWidth;
     private int _videoHeight;
     private bool _isInternalPositionUpdate;
-    private long _lastExternalSeekTick; // 防抖：最近一次外部 Seek 的时间戳
+    private DateTimeOffset _lastExternalSeekTime; // 防抖：最近一次外部 Seek 的时间戳
 
     // Interaction
     private bool _isPointerPressed;
     private Windows.Foundation.Point _lastPointerPos;
-    private long _lastPointerTick;
+    private DateTimeOffset _lastTime;
     private double _velocityX;
     private double _velocityY;
     private bool _isInertiaRunning;
@@ -258,7 +258,7 @@ public sealed class PanoMediaElement : Panel
         RotationX = 0.5;
         RotationY = 0.5;
         StopInertia();
-        if (!IsPlaying) RenderFrame();
+        if (!IsPlaying) RenderFrame(false);
     }
 
     #endregion
@@ -282,7 +282,7 @@ public sealed class PanoMediaElement : Panel
             if (c._player != null && c.Duration.TotalSeconds > 0 && position <= c.Duration)
                 c._player.PlaybackSession.Position = position;
 
-            c._lastExternalSeekTick = Environment.TickCount64;
+            c._lastExternalSeekTime = DateTimeOffset.Now;
 
             // 同步 Progress
             c._isInternalPositionUpdate = true;
@@ -310,7 +310,7 @@ public sealed class PanoMediaElement : Panel
                 c._isInternalPositionUpdate = false;
             }
 
-            c._lastExternalSeekTick = Environment.TickCount64;
+            c._lastExternalSeekTime = DateTimeOffset.Now;
         }
     }
 
@@ -436,11 +436,11 @@ public sealed class PanoMediaElement : Panel
     private void OnPlaybackPositionChanged(MediaPlaybackSession sender, object args)
     {
         // 外部 Seek 后 300ms 内抑制回写，避免播放器报告的位置覆盖滑块
-        if (Environment.TickCount64 - _lastExternalSeekTick < 300) return;
+        if ((DateTimeOffset.Now - _lastExternalSeekTime).TotalMilliseconds < 300) return;
 
         DispatcherQueue?.TryEnqueue(() =>
         {
-            if (Environment.TickCount64 - _lastExternalSeekTick < 300) return;
+            if ((DateTimeOffset.Now - _lastExternalSeekTime).TotalMilliseconds < 300) return;
             _isInternalPositionUpdate = true;
             Position = sender.Position;
             if (Duration.TotalSeconds > 0)
@@ -466,7 +466,7 @@ public sealed class PanoMediaElement : Panel
             NaturalVideoWidth = _videoWidth;
             NaturalVideoHeight = _videoHeight;
             Duration = sender.PlaybackSession.NaturalDuration;
-
+            
             _videoFrameBuffer?.Dispose();
             _videoFrameBuffer = new CanvasRenderTarget(
                 _canvasDevice!, _videoWidth, _videoHeight, 96f,
@@ -501,17 +501,18 @@ public sealed class PanoMediaElement : Panel
 
     private void OnVideoFrameAvailable(MediaPlayer sender, object args)
     {
-        DispatcherQueue?.TryEnqueue(RenderFrame);
+        DispatcherQueue?.TryEnqueue(() => RenderFrame());
     }
 
-    private void RenderFrame()
+    private void RenderFrame(bool copyFrame = true)
     {
         if (_drawingSurface == null || _shaderBytes == null ||
             _videoFrameBuffer == null || _player == null) return;
 
         try
         {
-            _player.CopyFrameToVideoSurface(_videoFrameBuffer);
+            if (copyFrame)
+                _player.CopyFrameToVideoSurface(_videoFrameBuffer);
 
             using var effect = new PixelShaderEffect(_shaderBytes)
             {
@@ -554,7 +555,7 @@ public sealed class PanoMediaElement : Panel
             _spriteVisual.Size = new Vector2((float)width, (float)height);
 
         ResizeDrawingSurface(width, height);
-        RenderFrame();
+        RenderFrame(false);
     }
 
     private void ResizeDrawingSurface(double width, double height)
@@ -580,7 +581,7 @@ public sealed class PanoMediaElement : Panel
     {
         _isPointerPressed = true;
         _lastPointerPos = e.GetCurrentPoint(this).Position;
-        _lastPointerTick = Environment.TickCount64;
+        _lastTime = DateTimeOffset.Now;
         _velocityX = 0;
         _velocityY = 0;
         StopInertia();
@@ -592,8 +593,8 @@ public sealed class PanoMediaElement : Panel
         if (!_isPointerPressed) return;
 
         var pos = e.GetCurrentPoint(this).Position;
-        var now = Environment.TickCount64;
-        var dt = Math.Max(1, now - _lastPointerTick);
+        var now = DateTimeOffset.Now;
+        var dt = Math.Max(1, (now - _lastTime).TotalMilliseconds);
 
         var dx = pos.X - _lastPointerPos.X;
         var dy = pos.Y - _lastPointerPos.Y;
@@ -619,9 +620,9 @@ public sealed class PanoMediaElement : Panel
         RotationX = rx;
         RotationY = ry;
         _lastPointerPos = pos;
-        _lastPointerTick = now;
+        _lastTime = now;
 
-        if (!IsPlaying) RenderFrame();
+        if (!IsPlaying) RenderFrame(false);
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -636,7 +637,7 @@ public sealed class PanoMediaElement : Panel
         var speed = Math.Sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
         if (speed < InertiaStopThreshold) return;
 
-        _lastPointerTick = Environment.TickCount64;
+        _lastTime = DateTimeOffset.Now;
         _isInertiaRunning = true;
         CompositionTarget.Rendering += OnInertiaRendering;
     }
@@ -652,9 +653,9 @@ public sealed class PanoMediaElement : Panel
 
     private void OnInertiaRendering(object? sender, object e)
     {
-        var now = Environment.TickCount64;
-        var dt = Math.Max(1, now - _lastPointerTick);
-        _lastPointerTick = now;
+        var now = DateTimeOffset.Now;
+        var dt = Math.Max(1, (now - _lastTime).TotalMilliseconds);
+        _lastTime = now;
 
         // 本帧位移 = 速度 × 时间
         var moveX = _velocityX * dt;
@@ -682,14 +683,14 @@ public sealed class PanoMediaElement : Panel
         RotationX = rx;
         RotationY = ry;
 
-        if (!IsPlaying) RenderFrame();
+        if (!IsPlaying) RenderFrame(false);
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
         var delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
         Zoom = Math.Clamp(Zoom + (delta > 0 ? 0.05 : -0.05), 0.1, 2.0);
-        if (!IsPlaying) RenderFrame();
+        if (!IsPlaying) RenderFrame(false);
     }
 
     #endregion

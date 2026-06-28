@@ -98,7 +98,7 @@ public class PanoEffect : ShaderEffect
     private FrameworkElement? _parent;
     private bool _isPressed;
     private Point _lastPos;
-    private long _lastTick;
+    private DateTimeOffset _lastTime;
     private double _velocityX;
     private double _velocityY;
     private bool _isInertiaRunning;
@@ -200,15 +200,6 @@ public class PanoEffect : ShaderEffect
         SetValue(ParamsProperty, new Point4D(rx, ry, GetZoom(_element), GetFov(_element)));
     }
 
-    private static long GetTick()
-    {
-#if NET6_0_OR_GREATER
-        return Environment.TickCount64;
-#else
-        return Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency;
-#endif
-    }
-
     private static double Clamp(double value, double min, double max)
         => Math.Max(min, Math.Min(max, value));
 
@@ -234,7 +225,7 @@ public class PanoEffect : ShaderEffect
         if (_element == null) return;
         _isPressed = true;
         _lastPos = e.GetPosition(_element);
-        _lastTick = GetTick();
+        _lastTime = DateTimeOffset.Now;
         _velocityX = 0;
         _velocityY = 0;
         StopInertia();
@@ -246,11 +237,12 @@ public class PanoEffect : ShaderEffect
         if (_element == null || !_isPressed || e.LeftButton != MouseButtonState.Pressed) return;
 
         var pos = e.GetPosition(_element);
-        var now = GetTick();
-        var dt = Math.Max(1, now - _lastTick);
+        var now = DateTimeOffset.Now;
+        var dt = Math.Max(1, (now - _lastTime).TotalMilliseconds);
 
         var dx = pos.X - _lastPos.X;
         var dy = pos.Y - _lastPos.Y;
+        if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5) return;
 
         var w = _element.ActualWidth;
         var h = _element.ActualHeight;
@@ -274,7 +266,7 @@ public class PanoEffect : ShaderEffect
         UpdateParamsRotation(rx, ry);
 
         _lastPos = pos;
-        _lastTick = now;
+        _lastTime = now;
     }
 
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
@@ -301,7 +293,7 @@ public class PanoEffect : ShaderEffect
         var speed = Math.Sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
         if (speed < InertiaStopThreshold) return;
 
-        _lastTick = GetTick();
+        _lastTime = DateTimeOffset.Now;
         _isInertiaRunning = true;
         CompositionTarget.Rendering += OnRendering;
     }
@@ -326,9 +318,9 @@ public class PanoEffect : ShaderEffect
             _lastRenderTime = args.RenderingTime;
         }
 
-        var now = GetTick();
-        var dt = Math.Max(1, now - _lastTick);
-        _lastTick = now;
+        var now = DateTimeOffset.Now;
+        var dt = Math.Max(1, (now - _lastTime).TotalMilliseconds);
+        _lastTime = now;
 
         // 正常处理
         var moveX = _velocityX * dt;
