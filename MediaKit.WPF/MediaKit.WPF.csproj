@@ -11,7 +11,7 @@
 
     <!-- NuGet 元数据 -->
     <PackageId>MediaKit.WPF</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>LazyCuteLion</Authors>
     <Description>WPF shader effects library providing Alpha channel separation, 360 panoramic video projection, and video tiling effects via pixel shaders.</Description>
     <PackageTags>WPF;ShaderEffect;Alpha;360Video;Panorama;Tile;PixelShader</PackageTags>
