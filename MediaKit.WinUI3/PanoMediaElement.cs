@@ -466,7 +466,7 @@ public sealed class PanoMediaElement : Panel
             NaturalVideoWidth = _videoWidth;
             NaturalVideoHeight = _videoHeight;
             Duration = sender.PlaybackSession.NaturalDuration;
-            
+
             _videoFrameBuffer?.Dispose();
             _videoFrameBuffer = new CanvasRenderTarget(
                 _canvasDevice!, _videoWidth, _videoHeight, 96f,
@@ -521,24 +521,18 @@ public sealed class PanoMediaElement : Panel
             };
             effect.Properties["panoParams"] = new Vector4(
                 (float)RotationX, (float)RotationY, (float)Zoom, (float)Fov);
-            effect.Properties["aspectRatio"] = GetAspectRatio();
+            effect.Properties["view"] = new Vector3(
+                (float)(this.ActualWidth / _videoWidth),
+                (float)(this.ActualHeight / _videoHeight),
+                (float)(this.ActualWidth / this.ActualHeight));
 
             using var ds = CanvasComposition.CreateDrawingSession(_drawingSurface);
-            ds.DrawImage(effect,
-                new Windows.Foundation.Rect(0, 0, _drawingSurface.Size.Width, _drawingSurface.Size.Height),
-                new Windows.Foundation.Rect(0, 0, _videoWidth, _videoHeight));
+            ds.DrawImage(effect);
         }
         catch
         {
             // Ignore rendering errors during transitions
         }
-    }
-
-    private float GetAspectRatio()
-    {
-        float w = (float)ActualWidth;
-        float h = (float)ActualHeight;
-        return (w > 0 && h > 0) ? w / h : 1.778f;
     }
 
     #endregion

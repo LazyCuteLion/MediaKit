@@ -4,7 +4,7 @@
 cbuffer constants : register(b0)
 {
     float4 panoParams;      // rotationX, rotationY, zoom, fov
-    float  aspectRatio;     // viewportWidth / viewportHeight
+    float3 view; // scaleX(view.width/source.width),scaleY(view.height/source.height),aspectRatio(view.width/view.height)
 };
 
 Texture2D<float4> inputTexture : register(t0);
@@ -28,8 +28,15 @@ float4 main(
     float rotationY = panoParams.y;
     float zoom = panoParams.z;
     float fov = panoParams.w;
+    
+    float scaleX = view.x;
+    float scaleY = view.y;
+    float aspectRatio = view.z;
 
-    float2 sampleUV = uv - 0.5;
+    if (uv.x > scaleX || uv.y > scaleY)
+        return float4(0, 0, 0, 0);
+
+    float2 sampleUV = float2(uv.x / scaleX - 0.5, uv.y / scaleY - 0.5);
 
     float hfovRad = fov * DEG2RAD;
     float vfovRad = 2.0 * atan(tan(hfovRad * 0.5) / aspectRatio);

@@ -19,8 +19,6 @@ namespace MediaKit.WPF;
 /// </summary>
 public class PanoEffect : ShaderEffect
 {
-    private static readonly Dictionary<FrameworkElement, PanoEffect> _effects = new();
-
     private static readonly PixelShader _shader = new()
     {
         UriSource = new Uri("pack://application:,,,/MediaKit.WPF;component/Shaders/Compiled/Pano.ps")
@@ -34,19 +32,19 @@ public class PanoEffect : ShaderEffect
 
     public static readonly DependencyProperty FovProperty =
         DependencyProperty.RegisterAttached("Fov", typeof(double), typeof(PanoEffect),
-            new PropertyMetadata(90.0, OnFovChanged));
+            new PropertyMetadata(90.0, OnParamsChanged));
 
     public static readonly DependencyProperty ZoomProperty =
         DependencyProperty.RegisterAttached("Zoom", typeof(double), typeof(PanoEffect),
-            new PropertyMetadata(0.5, OnZoomChanged));
+            new PropertyMetadata(0.5, OnParamsChanged));
 
     public static readonly DependencyProperty RotationXProperty =
         DependencyProperty.RegisterAttached("RotationX", typeof(double), typeof(PanoEffect),
-            new PropertyMetadata(0.5, OnRotationChanged));
+            new PropertyMetadata(0.5, OnParamsChanged));
 
     public static readonly DependencyProperty RotationYProperty =
         DependencyProperty.RegisterAttached("RotationY", typeof(double), typeof(PanoEffect),
-            new PropertyMetadata(0.5, OnRotationChanged));
+            new PropertyMetadata(0.5, OnParamsChanged));
 
     public static bool GetIsEnabled(UIElement e) => (bool)e.GetValue(IsEnabledProperty);
     public static void SetIsEnabled(UIElement e, bool v) => e.SetValue(IsEnabledProperty, v);
@@ -68,7 +66,7 @@ public class PanoEffect : ShaderEffect
     /// </summary>
     public static void Reset(UIElement e)
     {
-        if (e is FrameworkElement el && _effects.TryGetValue(el, out var effect))
+        if (e is FrameworkElement el && el.Effect is PanoEffect effect)
             effect.Reset();
     }
 
@@ -79,13 +77,15 @@ public class PanoEffect : ShaderEffect
     private static readonly DependencyProperty InputProperty =
         RegisterPixelShaderSamplerProperty("Input", typeof(PanoEffect), 0);
 
+    //rotationX,rotationY,zoom,fov
     private static readonly DependencyProperty ParamsProperty =
         DependencyProperty.Register("Params", typeof(Point4D), typeof(PanoEffect),
             new UIPropertyMetadata(new Point4D(0.5, 0.5, 0.5, 90.0), PixelShaderConstantCallback(0)));
 
+    //scaleX(view.width/source.width),scaleY(view.height/source.height),aspectRatio(view.width/view.height)
     private static readonly DependencyProperty ViewProperty =
-        DependencyProperty.Register("View", typeof(Point4D), typeof(PanoEffect),
-            new UIPropertyMetadata(new Point4D(1.0, 1.0, 1.778, 0.0), PixelShaderConstantCallback(1)));
+        DependencyProperty.Register("View", typeof(Vector3D), typeof(PanoEffect),
+            new UIPropertyMetadata(new Vector3D(1.0, 1.0, 1.778), PixelShaderConstantCallback(1)));
 
     #endregion
 
@@ -136,7 +136,7 @@ public class PanoEffect : ShaderEffect
         _initialRotationX = GetRotationX(element);
         _initialRotationY = GetRotationY(element);
 
-        SyncParams();
+        UpdateParams();
         element.Effect = this;
 
         element.MouseLeftButtonDown += OnMouseDown;
@@ -179,6 +179,7 @@ public class PanoEffect : ShaderEffect
             DependencyPropertyDescriptor.FromProperty(Image.SourceProperty, typeof(Image))
                 .RemoveValueChanged(_element, OnImageSourceChanged);
 
+        _element.Effect = null;
         _element = null;
     }
 
@@ -186,17 +187,21 @@ public class PanoEffect : ShaderEffect
 
     #region Internal Logic
 
-    private void SyncParams()
+    private bool _isUpdateingParams;
+
+    private void UpdateParams()
     {
-        if (_element == null) return;
-        SetValue(ParamsProperty, new Point4D(
-            GetRotationX(_element), GetRotationY(_element),
-            GetZoom(_element), GetFov(_element)));
+        if (_element == null || _isUpdateingParams) return;
+        SetValue(ParamsProperty, new Point4D(GetRotationX(_element), GetRotationY(_element), GetZoom(_element), GetFov(_element)));
     }
 
-    private void UpdateParamsRotation(double rx, double ry)
+    private void UpdateRotation(double rx, double ry)
     {
         if (_element == null) return;
+        _isUpdateingParams = true;
+        SetRotationX(_element, rx);
+        SetRotationY(_element, ry);
+        _isUpdateingParams = false;
         SetValue(ParamsProperty, new Point4D(rx, ry, GetZoom(_element), GetFov(_element)));
     }
 
@@ -210,10 +215,13 @@ public class PanoEffect : ShaderEffect
     {
         if (_element == null) return;
         StopInertia();
+        _isUpdateingParams = true;
         SetFov(_element, _initialFov);
         SetZoom(_element, _initialZoom);
         SetRotationX(_element, _initialRotationX);
         SetRotationY(_element, _initialRotationY);
+        _isUpdateingParams = false;
+        this.UpdateParams();
     }
 
     #endregion
@@ -242,12 +250,12 @@ public class PanoEffect : ShaderEffect
 
         var dx = pos.X - _lastPos.X;
         var dy = pos.Y - _lastPos.Y;
-        if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5) return;
 
-        var w = _element.ActualWidth;
-        var h = _element.ActualHeight;
+        var slot = LayoutInformation.GetLayoutSlot(_element);
+        var w = slot.Width;
+        var h = slot.Height;
         if (w <= 0 || h <= 0) return;
-
+        
         var instantVx = dx / w * 0.5 / dt;
         var instantVy = -dy / h * 0.5 / dt;
         const double alpha = 0.4;
@@ -261,9 +269,7 @@ public class PanoEffect : ShaderEffect
         if (rx < 0.0) rx += 1.0;
         ry = Clamp(ry, 0.01, 0.99);
 
-        SetRotationX(_element, rx);
-        SetRotationY(_element, ry);
-        UpdateParamsRotation(rx, ry);
+        UpdateRotation(rx, ry);
 
         _lastPos = pos;
         _lastTime = now;
@@ -344,9 +350,7 @@ public class PanoEffect : ShaderEffect
         if (rx < 0.0) rx += 1.0;
         ry = Clamp(ry, 0.01, 0.99);
 
-        SetRotationX(_element, rx);
-        SetRotationY(_element, ry);
-        UpdateParamsRotation(rx, ry);
+        UpdateRotation(rx, ry);
     }
 
     #endregion
@@ -366,8 +370,8 @@ public class PanoEffect : ShaderEffect
         double vpH = slot.Height;
         if (vpW <= 0 || vpH <= 0) return;
 
-        double videoW = _element.ActualWidth;
-        double videoH = _element.ActualHeight;
+        double videoW = vpW;
+        double videoH = vpH;
         if (_element is MediaElement me && me.NaturalVideoWidth > 0)
         {
             videoW = me.NaturalVideoWidth;
@@ -382,11 +386,11 @@ public class PanoEffect : ShaderEffect
         _element.Width = Math.Max(vpW, videoW);
         _element.Height = Math.Max(vpH, videoH);
 
-        double boundX = Math.Min(1.0, vpW / videoW);
-        double boundY = Math.Min(1.0, vpH / videoH);
+        double scaleX = Math.Min(1.0, vpW / videoW);
+        double scaleY = Math.Min(1.0, vpH / videoH);
         double aspectRatio = vpH > 0 ? vpW / vpH : 1.778;
 
-        SetValue(ViewProperty, new Point4D(boundX, boundY, aspectRatio, 0));
+        SetValue(ViewProperty, new Vector3D(scaleX, scaleY, aspectRatio));
     }
 
     #endregion
@@ -400,36 +404,21 @@ public class PanoEffect : ShaderEffect
         if ((bool)e.NewValue)
         {
             var effect = new PanoEffect();
-            _effects[element] = effect;
             effect.Attach(element);
         }
         else
         {
-            if (_effects.TryGetValue(element, out var effect))
+            if (element.Effect is PanoEffect effect)
             {
                 effect.Detach();
-                _effects.Remove(element);
             }
-            element.Effect = null;
         }
     }
 
-    private static void OnFovChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    private static void OnParamsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is FrameworkElement el && _effects.TryGetValue(el, out var effect))
-            effect.SyncParams();
-    }
-
-    private static void OnZoomChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is FrameworkElement el && _effects.TryGetValue(el, out var effect))
-            effect.SyncParams();
-    }
-
-    private static void OnRotationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is FrameworkElement el && _effects.TryGetValue(el, out var effect))
-            effect.SyncParams();
+        if (d is FrameworkElement el && el.Effect is PanoEffect effect)
+            effect.UpdateParams();
     }
 
     #endregion
