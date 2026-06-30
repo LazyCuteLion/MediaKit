@@ -8,6 +8,7 @@ using Microsoft.Graphics.Canvas.UI.Composition;
 using Microsoft.Graphics.DirectX;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Composition.Interactions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -23,7 +24,7 @@ namespace MediaKit.WinUI3;
 /// 基于 Composition API + Win2D PixelShaderEffect 实现球面投影渲染。
 /// 内置鼠标拖拽旋转和滚轮缩放交互。
 /// </summary>
-public sealed class PanoMediaElement : Panel
+public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 {
     // Composition
     private Compositor? _compositor;
@@ -34,7 +35,7 @@ public sealed class PanoMediaElement : Panel
     // Win2D
     private CanvasDevice? _canvasDevice;
     private CanvasRenderTarget? _videoFrameBuffer;
-    private byte[]? _shaderBytes;
+    private PixelShaderEffect? _panoEffect;
 
     // Media
     private MediaPlayer? _player;
@@ -43,13 +44,22 @@ public sealed class PanoMediaElement : Panel
     private bool _isInternalPositionUpdate;
     private DateTimeOffset _lastExternalSeekTime; // 防抖：最近一次外部 Seek 的时间戳
 
+#if DEBUG
+    // FPS
+    private int _frameCount;
+    private DateTimeOffset _lastFpsTick;
+#endif
+
     // Interaction
+    private const float TrackerScale = 5000f;
+    private InteractionTracker? _tracker;
+    private Vector3 _lastTrackerPosition;
     private bool _isPointerPressed;
     private Windows.Foundation.Point _lastPointerPos;
     private DateTimeOffset _lastTime;
     private double _velocityX;
     private double _velocityY;
-    private bool _isInertiaRunning;
+    private bool _suppressRender;
 
     /// <summary>初始化 PanoMediaElement 实例。</summary>
     public PanoMediaElement()
@@ -59,7 +69,7 @@ public sealed class PanoMediaElement : Panel
         StopCommand = new RelayCommand(Stop);
         ResetCommand = new RelayCommand(Reset);
 
-        Background = new SolidColorBrush(Colors.Black);
+        Background = new SolidColorBrush(Colors.Transparent);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         SizeChanged += OnSizeChanged;
@@ -79,22 +89,22 @@ public sealed class PanoMediaElement : Panel
     /// <summary>水平旋转 [0,1]，0.5 为初始正前方。</summary>
     public static readonly DependencyProperty RotationXProperty =
         DependencyProperty.Register(nameof(RotationX), typeof(double), typeof(PanoMediaElement),
-            new PropertyMetadata(0.5));
+            new PropertyMetadata(0.5, OnViewParamChanged));
 
     /// <summary>垂直旋转 [0,1]，0.5 为水平视线。</summary>
     public static readonly DependencyProperty RotationYProperty =
         DependencyProperty.Register(nameof(RotationY), typeof(double), typeof(PanoMediaElement),
-            new PropertyMetadata(0.5));
+            new PropertyMetadata(0.5, OnViewParamChanged));
 
     /// <summary>缩放级别，默认 0.5。</summary>
     public static readonly DependencyProperty ZoomProperty =
         DependencyProperty.Register(nameof(Zoom), typeof(double), typeof(PanoMediaElement),
-            new PropertyMetadata(0.5));
+            new PropertyMetadata(0.5, OnViewParamChanged));
 
     /// <summary>视场角（度），默认 90。</summary>
     public static readonly DependencyProperty FovProperty =
         DependencyProperty.Register(nameof(Fov), typeof(double), typeof(PanoMediaElement),
-            new PropertyMetadata(90.0));
+            new PropertyMetadata(90.0, OnViewParamChanged));
 
     /// <summary>当前播放位置。外部设置时自动执行 Seek 并启动拖拽防护。</summary>
     public static readonly DependencyProperty PositionProperty =
@@ -253,12 +263,18 @@ public sealed class PanoMediaElement : Panel
     /// <summary>重置视角参数为默认值。</summary>
     public void Reset()
     {
+        _suppressRender = true;
         Fov = 90.0;
         Zoom = 0.5;
         RotationX = 0.5;
         RotationY = 0.5;
-        StopInertia();
-        if (!IsPlaying) RenderFrame(false);
+        _suppressRender = false;
+        if (_tracker != null)
+        {
+            _lastTrackerPosition = _tracker.Position;
+            _tracker.TryUpdatePosition(_tracker.Position);
+        }
+        RenderFrame();
     }
 
     #endregion
@@ -338,6 +354,12 @@ public sealed class PanoMediaElement : Panel
             c._player.IsLoopingEnabled = (bool)e.NewValue;
     }
 
+    private static void OnViewParamChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PanoMediaElement c && !c._suppressRender)
+            c.RenderFrame();
+    }
+
     #endregion
 
     #region Lifecycle
@@ -358,14 +380,18 @@ public sealed class PanoMediaElement : Panel
 
     private void InitializeRendering()
     {
-        // 从嵌入资源加载预编译着色器
+        // 从嵌入资源加载预编译着色器，创建 PixelShaderEffect（仅一次）
         using (var stream = typeof(PanoMediaElement).Assembly
             .GetManifestResourceStream("Pano.cso"))
         {
             if (stream != null)
             {
-                _shaderBytes = new byte[stream.Length];
-                stream.ReadExactly(_shaderBytes);
+                var shaderBytes = new byte[stream.Length];
+                stream.ReadExactly(shaderBytes);
+                _panoEffect = new PixelShaderEffect(shaderBytes)
+                {
+                    Source1BorderMode = EffectBorderMode.Hard
+                };
             }
         }
 
@@ -388,6 +414,12 @@ public sealed class PanoMediaElement : Panel
         _spriteVisual.Size = new Vector2((float)ActualWidth, (float)ActualHeight);
 
         ElementCompositionPreview.SetElementChildVisual(this, _spriteVisual);
+
+        // InteractionTracker：系统级惯性动画
+        _tracker = InteractionTracker.CreateWithOwner(_compositor, this);
+        _tracker.MinPosition = new Vector3(float.MinValue);
+        _tracker.MaxPosition = new Vector3(float.MaxValue);
+        _tracker.PositionInertiaDecayRate = new Vector3(0.8f, 0.8f, 0f);
 
         _player = new MediaPlayer();
         _player.IsVideoFrameServerEnabled = true;
@@ -414,8 +446,11 @@ public sealed class PanoMediaElement : Panel
             _player.Dispose();
             _player = null;
         }
+        _panoEffect?.Dispose();
+        _panoEffect = null;
         _videoFrameBuffer?.Dispose();
         _videoFrameBuffer = null;
+        _tracker = null;
     }
 
     #endregion
@@ -501,33 +536,42 @@ public sealed class PanoMediaElement : Panel
 
     private void OnVideoFrameAvailable(MediaPlayer sender, object args)
     {
-        DispatcherQueue?.TryEnqueue(() => RenderFrame());
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            _player?.CopyFrameToVideoSurface(_videoFrameBuffer);
+            RenderFrame();
+        });
     }
 
-    private void RenderFrame(bool copyFrame = true)
+    private void RenderFrame()
     {
-        if (_drawingSurface == null || _shaderBytes == null ||
-            _videoFrameBuffer == null || _player == null) return;
+        var buffer = _videoFrameBuffer;
+        if (_drawingSurface == null || _panoEffect == null ||
+            buffer == null || _player == null) return;
 
         try
         {
-            if (copyFrame)
-                _player.CopyFrameToVideoSurface(_videoFrameBuffer);
-
-            using var effect = new PixelShaderEffect(_shaderBytes)
-            {
-                Source1 = _videoFrameBuffer,
-                Source1BorderMode = EffectBorderMode.Hard
-            };
-            effect.Properties["panoParams"] = new Vector4(
+            _panoEffect.Source1 = buffer;
+            _panoEffect.Properties["panoParams"] = new Vector4(
                 (float)RotationX, (float)RotationY, (float)Zoom, (float)Fov);
-            effect.Properties["view"] = new Vector3(
+            _panoEffect.Properties["view"] = new Vector3(
                 (float)(this.ActualWidth / _videoWidth),
                 (float)(this.ActualHeight / _videoHeight),
                 (float)(this.ActualWidth / this.ActualHeight));
 
             using var ds = CanvasComposition.CreateDrawingSession(_drawingSurface);
-            ds.DrawImage(effect);
+            ds.DrawImage(_panoEffect);
+
+#if DEBUG
+            _frameCount++;
+            var now = DateTimeOffset.Now;
+            if ((now - _lastFpsTick).TotalMilliseconds >= 1000)
+            {
+                System.Diagnostics.Debug.WriteLine($"FPS: {_frameCount * 1000.0 / (now - _lastFpsTick).TotalMilliseconds:f1}");
+                _frameCount = 0;
+                _lastFpsTick = now;
+            }
+#endif
         }
         catch
         {
@@ -549,7 +593,7 @@ public sealed class PanoMediaElement : Panel
             _spriteVisual.Size = new Vector2((float)width, (float)height);
 
         ResizeDrawingSurface(width, height);
-        RenderFrame(false);
+        RenderFrame();
     }
 
     private void ResizeDrawingSurface(double width, double height)
@@ -567,10 +611,6 @@ public sealed class PanoMediaElement : Panel
 
     #region Pointer Interaction
 
-    /// <summary>每 16ms 的速度保留比，值越接近 1 滑行越远。 0.95 ≈ 中速拖拽 2~3 秒停止。</summary>
-    private const double InertiaFriction = 0.95;
-    private const double InertiaStopThreshold = 0.0000005;
-
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         _isPointerPressed = true;
@@ -578,7 +618,12 @@ public sealed class PanoMediaElement : Panel
         _lastTime = DateTimeOffset.Now;
         _velocityX = 0;
         _velocityY = 0;
-        StopInertia();
+        // 停止正在进行的惯性
+        if (_tracker != null)
+        {
+            _lastTrackerPosition = _tracker.Position;
+            _tracker.TryUpdatePosition(_tracker.Position);
+        }
         CapturePointer(e.Pointer);
     }
 
@@ -611,81 +656,72 @@ public sealed class PanoMediaElement : Panel
         if (rx < 0.0f) rx += 1.0f;
         ry = Math.Clamp(ry, 0.01f, 0.99f);
 
+        _suppressRender = true;
         RotationX = rx;
         RotationY = ry;
+        _suppressRender = false;
         _lastPointerPos = pos;
         _lastTime = now;
 
-        if (!IsPlaying) RenderFrame(false);
+        RenderFrame();
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
         _isPointerPressed = false;
         ReleasePointerCapture(e.Pointer);
-        StartInertia();
-    }
 
-    private void StartInertia()
-    {
+        // 注入速度到 InteractionTracker，由系统处理惯性
         var speed = Math.Sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
-        if (speed < InertiaStopThreshold) return;
-
-        _lastTime = DateTimeOffset.Now;
-        _isInertiaRunning = true;
-        CompositionTarget.Rendering += OnInertiaRendering;
-    }
-
-    private void StopInertia()
-    {
-        if (_isInertiaRunning)
+        if (speed > 0.0001 && _tracker != null)
         {
-            _isInertiaRunning = false;
-            CompositionTarget.Rendering -= OnInertiaRendering;
+            _lastTrackerPosition = _tracker.Position;
+            _tracker.TryUpdatePositionWithAdditionalVelocity(
+                new Vector3((float)(_velocityX * 1000 * TrackerScale),
+                            (float)(_velocityY * 1000 * TrackerScale), 0));
         }
-    }
-
-    private void OnInertiaRendering(object? sender, object e)
-    {
-        var now = DateTimeOffset.Now;
-        var dt = Math.Max(1, (now - _lastTime).TotalMilliseconds);
-        _lastTime = now;
-
-        // 本帧位移 = 速度 × 时间
-        var moveX = _velocityX * dt;
-        var moveY = _velocityY * dt;
-
-        // 指数衰减：快时减得多、慢时减得少，自然滑行感
-        var decay = Math.Pow(InertiaFriction, dt / 16.0);
-        _velocityX *= decay;
-        _velocityY *= decay;
-
-        if (Math.Abs(_velocityX) < InertiaStopThreshold &&
-            Math.Abs(_velocityY) < InertiaStopThreshold)
-        {
-            StopInertia();
-            return;
-        }
-
-        var rx = (float)(RotationX + moveX);
-        var ry = (float)(RotationY + moveY);
-
-        if (rx > 1.0f) rx -= 1.0f;
-        if (rx < 0.0f) rx += 1.0f;
-        ry = Math.Clamp(ry, 0.01f, 0.99f);
-
-        RotationX = rx;
-        RotationY = ry;
-
-        if (!IsPlaying) RenderFrame(false);
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
         var delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
         Zoom = Math.Clamp(Zoom + (delta > 0 ? 0.05 : -0.05), 0.1, 2.0);
-        if (!IsPlaying) RenderFrame(false);
     }
+
+    #endregion
+
+    #region IInteractionTrackerOwner
+
+    void IInteractionTrackerOwner.ValuesChanged(InteractionTracker sender, InteractionTrackerValuesChangedArgs args)
+    {
+        var delta = args.Position - _lastTrackerPosition;
+        _lastTrackerPosition = args.Position;
+
+        if (Math.Abs(delta.X) < 0.0001 && Math.Abs(delta.Y) < 0.0001) return;
+
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            var rx = RotationX + delta.X / TrackerScale;
+            var ry = RotationY + delta.Y / TrackerScale;
+
+            if (rx > 1.0) rx -= 1.0;
+            if (rx < 0.0) rx += 1.0;
+            ry = Math.Clamp(ry, 0.01, 0.99);
+
+            _suppressRender = true;
+            RotationX = rx;
+            RotationY = ry;
+            _suppressRender = false;
+
+            RenderFrame();
+        });
+    }
+
+    void IInteractionTrackerOwner.CustomAnimationStateEntered(InteractionTracker sender, InteractionTrackerCustomAnimationStateEnteredArgs args) { }
+    void IInteractionTrackerOwner.IdleStateEntered(InteractionTracker sender, InteractionTrackerIdleStateEnteredArgs args) { }
+    void IInteractionTrackerOwner.InertiaStateEntered(InteractionTracker sender, InteractionTrackerInertiaStateEnteredArgs args) { }
+    void IInteractionTrackerOwner.InteractingStateEntered(InteractionTracker sender, InteractionTrackerInteractingStateEnteredArgs args) { }
+    void IInteractionTrackerOwner.RequestIgnored(InteractionTracker sender, InteractionTrackerRequestIgnoredArgs args) { }
 
     #endregion
 }
