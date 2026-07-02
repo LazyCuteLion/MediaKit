@@ -7,3 +7,4 @@
 /.vs
 *.suo
 *.user
+/tools/shader-converter

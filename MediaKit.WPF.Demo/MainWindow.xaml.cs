@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using MediaKit.WPF;
+using MediaKit.WPF.Effects;
 
 namespace MediaKit.WPF.Demo;
 
@@ -30,10 +31,8 @@ public partial class MainWindow : Window
         var rb = sender as RadioButton;
         var tag = rb?.Content?.ToString();
 
-        // 先清除所有效果
-        PanoEffect.SetIsEnabled(player, false);
-        TileEffect.SetIsEnabled(player, false);
-        AlphaEffect.SetIsEnabled(player, false);
+        // 先清除当前效果
+        DetachCurrentEffect();
         Panel_VR.Visibility = Visibility.Collapsed;
         Panel_Tile.Visibility = Visibility.Collapsed;
         Panel_Alpha.Visibility = Visibility.Collapsed;
@@ -41,21 +40,23 @@ public partial class MainWindow : Window
         switch (tag)
         {
             case "VR":
-                PanoEffect.SetIsEnabled(player, true);
-                PanoEffect.SetFov(player, sliderFov.Value);
-                PanoEffect.SetZoom(player, sliderZoom.Value);
+                var pano = new PanoEffect { Fov = sliderFov.Value, Zoom = sliderZoom.Value };
+                pano.Attach(player);
                 Panel_VR.Visibility = Visibility.Visible;
-                // 绑定 Slider → 附加属性
+                // 绑定 Slider → 实例属性
                 sliderFov.ValueChanged -= SliderFov_ValueChanged;
                 sliderFov.ValueChanged += SliderFov_ValueChanged;
                 sliderZoom.ValueChanged -= SliderZoom_ValueChanged;
                 sliderZoom.ValueChanged += SliderZoom_ValueChanged;
                 break;
             case "Tile":
-                TileEffect.SetIsEnabled(player, true);
-                TileEffect.SetRows(player, sliderRows.Value);
-                TileEffect.SetColumns(player, sliderColumns.Value);
-                TileEffect.SetSpacing(player, sliderSpacing.Value);
+                var tile = new TileEffect
+                {
+                    Rows = sliderRows.Value,
+                    Columns = sliderColumns.Value,
+                    Spacing = sliderSpacing.Value
+                };
+                tile.Attach(player);
                 Panel_Tile.Visibility = Visibility.Visible;
                 sliderRows.ValueChanged -= SliderTile_ValueChanged;
                 sliderRows.ValueChanged += SliderTile_ValueChanged;
@@ -65,30 +66,75 @@ public partial class MainWindow : Window
                 sliderSpacing.ValueChanged += SliderTile_ValueChanged;
                 break;
             case "Alpha":
-                AlphaEffect.SetIsEnabled(player, true);
+                var alpha = new AlphaEffect();
+                alpha.Attach(player);
                 Panel_Alpha.Visibility = Visibility.Visible;
                 break;
         }
     }
 
+    private void DetachCurrentEffect()
+    {
+        switch (player.Effect)
+        {
+            case PanoEffect pano: pano.Detach(); break;
+            case TileEffect tile: tile.Detach(); break;
+            case AlphaEffect alpha: alpha.Detach(); break;
+        }
+        player.Effect = null;
+    }
+
     private void SliderFov_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        => PanoEffect.SetFov(player, e.NewValue);
+    {
+        if (player.Effect is PanoEffect pano) pano.Fov = e.NewValue;
+    }
 
     private void SliderZoom_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        => PanoEffect.SetZoom(player, e.NewValue);
+    {
+        if (player.Effect is PanoEffect pano) pano.Zoom = e.NewValue;
+    }
 
     private void SliderTile_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        TileEffect.SetRows(player, sliderRows.Value);
-        TileEffect.SetColumns(player, sliderColumns.Value);
-        TileEffect.SetSpacing(player, sliderSpacing.Value);
+        if (player.Effect is TileEffect tile)
+        {
+            tile.Rows = sliderRows.Value;
+            tile.Columns = sliderColumns.Value;
+            tile.Spacing = sliderSpacing.Value;
+        }
     }
 
     private void AlphaPos_Checked(object sender, RoutedEventArgs e)
     {
         if (player == null) return;
         var rb = sender as RadioButton;
-        if (Enum.TryParse<Dock>(rb?.Content?.ToString(), out var dock))
-            AlphaEffect.SetPosition(player, dock);
+        if (player.Effect is AlphaEffect alpha &&
+            Enum.TryParse<Dock>(rb?.Content?.ToString(), out var dock))
+            alpha.Position = dock;
+    }
+
+    // 当前背景效果的卸载委托（背景效果均为 @register 自包含类，含 Attach/Detach）
+    private Action? _detachBg;
+
+    private void BgEffect_Checked(object sender, RoutedEventArgs e)
+    {
+        if (bgLayer == null) return;
+
+        _detachBg?.Invoke();
+        _detachBg = null;
+
+        var tag = (sender as RadioButton)?.Content?.ToString();
+        switch (tag)
+        {
+            case "bg1": { var fx = new Bg1Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "Thirteen": { var fx = new ThirteenEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "Pyramid": { var fx = new PyramidEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "Clouds": { var fx = new CloudsEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "Octgrams": { var fx = new OctgramsEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "PhantomStar": { var fx = new PhantomStarEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            // Heartfelt 采样输入图像（雨滴玻璃扭曲），挂到视频元素上更直观
+            case "Heartfelt": { var fx = new HeartfeltEffect(); fx.Attach(player); _detachBg = fx.Detach; break; }
+            case "Ripple": { var fx = new RippleEffect(); fx.Attach(player); _detachBg = fx.Detach; break; }
+        }
     }
 }

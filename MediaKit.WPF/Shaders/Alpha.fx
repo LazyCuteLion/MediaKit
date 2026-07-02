@@ -1,4 +1,4 @@
-
+// @effect: AlphaEffect
 float position : register(C0) = float(2.0);
 
 

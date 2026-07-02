@@ -75,6 +75,12 @@ public static class MediaBehavior
             }
             else
             {
+                // 订阅卸载/加载，卸载时清除追踪器避免 _trackers 静态字典泄漏，重载时按需重建
+                me.Unloaded -= OnMediaUnloaded;
+                me.Unloaded += OnMediaUnloaded;
+                me.Loaded -= OnMediaLoaded;
+                me.Loaded += OnMediaLoaded;
+
                 var tracker = new ProgressTracker(me, ms);
                 _trackers[me] = tracker;
                 tracker.Start();
@@ -82,11 +88,34 @@ public static class MediaBehavior
         }
         else
         {
+            me.Unloaded -= OnMediaUnloaded;
+            me.Loaded -= OnMediaLoaded;
             if (_trackers.TryGetValue(me, out var tracker))
             {
                 tracker.Stop();
                 _trackers.Remove(me);
             }
+        }
+    }
+
+    private static void OnMediaUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is MediaElement me && _trackers.TryGetValue(me, out var tracker))
+        {
+            tracker.Stop();
+            _trackers.Remove(me);
+        }
+    }
+
+    private static void OnMediaLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MediaElement me) return;
+        var ms = GetInterval(me);
+        if (ms > 0 && !_trackers.ContainsKey(me))
+        {
+            var tracker = new ProgressTracker(me, ms);
+            _trackers[me] = tracker;
+            tracker.Start();
         }
     }
 

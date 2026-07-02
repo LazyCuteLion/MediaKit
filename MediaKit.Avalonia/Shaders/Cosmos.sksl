@@ -1,0 +1,194 @@
+uniform float2 iResolution;
+uniform float iTime;
+
+// Volumetric star field constants
+const int ITERATIONS = 13;
+const float FORMUPARAM = 0.53;
+const int VOLSTEPS = 20;
+const float STEPSIZE = 0.1;
+const float ZOOM = 0.800;
+const float TILE_SIZE = 0.850;
+const float BRIGHTNESS = 0.0015;
+const float DARKMATTER = 0.300;
+const float DISTFADING = 0.730;
+const float SATURATION = 0.850;
+
+const float PI = 3.141592;
+const float TWOPI = 6.283184;
+const float DEG2RAD = PI / 180.0;
+const int OC = 15;
+
+// tanh for float2 (SkSL has no built-in tanh)
+float2 tanh2(float2 x) {
+    x = clamp(x, -10.0, 10.0);
+    float2 e = exp(2.0 * x);
+    return (e - 1.0) / (e + 1.0);
+}
+
+float2x2 rotMat(float a) {
+    float c = cos(a);
+    float s = sin(a);
+    return float2x2(c, -s, s, c);
+}
+
+float abs1d(float x) { return abs(fract(x) - 0.5); }
+float2 abs2d(float2 v) { return abs(fract(v) - 0.5); }
+float sin1d(float p) { return sin(p * TWOPI) * 0.25 + 0.25; }
+
+float3 Oilnoise(float2 pos, float3 RGB) {
+    float2 q = float2(0.0);
+    float result = 0.0;
+    float s = 2.2;
+    float gain = 0.44;
+    float2 aPos = abs2d(pos) * 0.5;
+
+    for (int i = 0; i < OC; i++) {
+        pos = pos * rotMat(DEG2RAD * 30.0);
+        float t = (sin(iTime) * 0.5 + 0.5) * 0.2 + iTime * 0.8;
+        q = pos * s + aPos + t;
+        q = cos(q);
+        result += sin1d(dot(q, float2(0.3))) * gain;
+        s *= 1.07;
+        aPos += cos(smoothstep(float2(0.0), float2(0.15), q));
+        aPos = aPos * rotMat(DEG2RAD * 5.0);
+        aPos *= 1.232;
+    }
+
+    result = pow(result, 4.504);
+    return clamp(RGB / abs1d(dot(q, float2(-0.240, 0.000))) * 0.5 / result, float3(0.0), float3(1.0));
+}
+
+float easeFade(float x) {
+    float t = 2.0 * x - 1.0;
+    return 1.0 - t * t * t * t;
+}
+
+float holeFade(float t, float life, float lo) {
+    return easeFade(mod(t - lo, life) / life);
+}
+
+float2 getPos(float t, float life, float offset, float lo) {
+    float phase = floor((t - lo) / life) * life;
+    return float2(
+        cos(offset + phase) * iResolution.x / 2.0,
+        sin(2.0 * offset + phase) * iResolution.y / 2.0
+    );
+}
+
+float4 volumetricStars(float3 ro, float3 rd) {
+    float3 dir = rd;
+    float3 from = ro;
+    float s = 0.1;
+    float fade = 1.0;
+    float3 v = float3(0.0);
+
+    for (int r = 0; r < VOLSTEPS; r++) {
+        float3 p = from + s * dir * 0.5;
+        p = abs(float3(TILE_SIZE) - mod(p, float3(TILE_SIZE * 2.0)));
+        float pa = 0.0;
+        float a = 0.0;
+        for (int i = 0; i < ITERATIONS; i++) {
+            p = abs(p) / dot(p, p) - FORMUPARAM;
+            float ct = cos(iTime * 0.01);
+            float st = sin(iTime * 0.01);
+            p.xy = p.xy * float2x2(ct, st, -st, ct);
+            a += abs(length(p) - pa);
+            pa = length(p);
+        }
+        float dm = max(0.0, DARKMATTER - a * a * 0.001);
+        a *= a * a;
+        if (r > 6) fade *= 1.3 - dm;
+        v += fade;
+        v += float3(s, s * s, s * s * s * s) * a * BRIGHTNESS * fade;
+        fade *= DISTFADING;
+        s += STEPSIZE;
+    }
+    v = mix(float3(length(v)), v, SATURATION);
+    return float4(v * 0.01, 1.0);
+}
+
+half4 main(float2 fragCoord) {
+    // Flip Y for Skia coordinate system (Y-down)
+    fragCoord.y = iResolution.y - fragCoord.y;
+
+    float2 uv = fragCoord / iResolution - 0.5;
+    float2 cPos = -1.0 + 2.0 * fragCoord / iResolution;
+    float cLength = length(cPos);
+
+    // --- Oil noise ---
+    float2 st = fragCoord / iResolution;
+    st.x = ((st.x - 0.5) * (iResolution.x / iResolution.y)) + 0.5;
+    st *= 3.0;
+    float3 oilCol = Oilnoise(st, float3(0.30, 0.8, 1.200));
+
+    // --- Thirteen-style iterative fractal ---
+    uv.y *= iResolution.y / iResolution.x;
+    float2 v = iResolution;
+    float2 w = float2(0.0);
+    float2 u = 0.2 * (fragCoord + fragCoord - v) / v.y;
+    float2 k = u;
+    float4 o = float4(1.0, 2.0, 3.0, 0.0);
+
+    float amp = 0.5;
+    float tl = iTime * 0.21;
+
+    for (float i = 1.0; i < 19.0; i += 1.0) {
+        tl += 1.0;
+        amp += 0.03;
+        v = cos(tl - 7.0 * u * pow(amp, i)) - 5.0 * u;
+
+        float4 c4 = cos(i + tl * 0.02 - float4(0.0, 11.0, 33.0, 0.0));
+        u = u * float2x2(c4.x, c4.y, c4.z, c4.w);
+
+        u += 0.005 * tanh2(40.0 * dot(u, u) * cos(100.0 * u.yx + tl))
+           + 0.2 * amp * u
+           + 0.003 * cos(tl + 4.0 * exp(-0.01 * dot(o, o)));
+
+        w = u / (1.0 - 2.0 * dot(u, u));
+
+        o += (1.0 + cos(float4(0.0, 1.0, 3.0, 0.0) + tl))
+           / length((1.0 + i * dot(v, v)) * sin(w * 3.0 - 9.0 * u.yx + tl));
+    }
+
+    o = 1.0 - sqrt(exp(-o * o * o / 200.0));
+    o = pow(o, float4(0.3));
+    k -= u;
+    o -= dot(k, k) / 250.0;
+
+    // --- Direction for volumetric stars ---
+    float3 dir = float3(uv * ZOOM, 1.0);
+
+    // --- Glowing animated holes ---
+    float2 coord = fragCoord * 2.0 - iResolution;
+    float holeSize = iResolution.y / 10.0;
+    float holeLife = 2.0;
+    float2 uvHole = fragCoord / iResolution - 0.5;
+
+    float3 holes = float3(0.0);
+    for (int i = 0; i < 45; i++) {
+        float fi = float(i);
+        float3 hcol = 0.5 + 0.5 * cos(iTime + uvHole.xyx + float3(fi, 2.0 * fi + 4.0, 4.0 * fi + 16.0));
+        float lifeOffset = fi / 2.0;
+        float2 hpos = getPos(iTime, holeLife, fi * 4.5, lifeOffset);
+        float d = distance(coord, hpos) / holeSize;
+        d = 1.0 / d - 0.1;
+        holes += mix(float3(0.0), hcol, d) * holeFade(iTime, holeLife, lifeOffset);
+    }
+
+    // --- Glow (tonemapped oil noise) ---
+    float3 col2 = 1.0 - exp(-oilCol);
+
+    // --- Volumetric star field ---
+    float3 from = float3(1.0, 0.5, 0.5);
+    float angle = floor(atan(from.y, from.x) * 4.0 + 0.5) / 4.0;
+    from.xy = from.xy * rotMat(angle) * 2.0;
+    from.xy += (cPos / cLength) * cos(cLength * 8.0 - iTime * 2.0) * 0.03;
+
+    float4 fragColor = volumetricStars(from, dir);
+
+    // --- Composite ---
+    fragColor *= float4(holes * float3(0.4, 1.0, 1.0) + o.xyz, 1.0);
+    fragColor += float4(col2, 1.0);
+
+    return half4(clamp(fragColor, 0.0, 1.0));
+}

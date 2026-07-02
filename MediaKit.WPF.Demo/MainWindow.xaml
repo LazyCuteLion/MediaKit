@@ -6,12 +6,33 @@
         Width="1280"
         Height="760">
 
-    <Grid x:Name="container" Background="Green">
+    <Grid x:Name="container" Background="Green" >
+        <Border x:Name="bgLayer" Background="Black" />
         <MediaElement x:Name="player"
                       LoadedBehavior="Manual"
                       RenderTransformOrigin="0,0"
                       Stretch="Uniform"
-                      media:MediaBehavior.Interval="100" />
+                      media:MediaBehavior.Interval="100" 
+                      />
+
+        <StackPanel VerticalAlignment="Top"
+                    Background="#1D000000"
+                    Orientation="Horizontal">
+            <TextBlock Margin="10,0,4,0"
+                       VerticalAlignment="Center"
+                       Foreground="White"
+                       Text="背景效果：" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="None" Foreground="White" IsChecked="True" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg1" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Thirteen" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Pyramid" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Clouds" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Octgrams" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="PhantomStar" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Heartfelt" Foreground="White" />
+             <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Ripple" Foreground="White" />
+        </StackPanel>
+        
         <StackPanel VerticalAlignment="Bottom">
             <Grid Margin="10,0">
                 <Grid.ColumnDefinitions>
