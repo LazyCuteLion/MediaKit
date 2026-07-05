@@ -1,0 +1,131 @@
+﻿<Project>
+
+  <UsingTask TaskName="GenerateEffectStubs" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <SkslFiles ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <EffectsDir ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var regex = new Regex(@"^//\s*@effect\s*(?::\s*(\w+))?", RegexOptions.Multiline);
+        
+        if (!Directory.Exists(EffectsDir))
+            Directory.CreateDirectory(EffectsDir);
+
+        // 收集当前所有 @effect 对应的类名，并检测重复
+        var validClassNames = new System.Collections.Generic.HashSet<string>();
+        var classToFiles = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>();
+
+        foreach (var item in SkslFiles)
+        {
+            var path = item.GetMetadata("FullPath");
+            if (!File.Exists(path)) continue;
+
+            var content = File.ReadAllText(path);
+            var match = regex.Match(content);
+            if (!match.Success) continue;
+
+            var markerVal = match.Groups[1].Success ? match.Groups[1].Value : null;
+            // @effect: default → 仅注册描述符，不生成强类型类，跳过骨架生成与重复检测
+            if (string.Equals(markerVal, "default", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            var className = !string.IsNullOrEmpty(markerVal)
+                ? markerVal
+                : fileName + "Effect";
+
+            validClassNames.Add(className);
+            if (!classToFiles.TryGetValue(className, out var list))
+                classToFiles[className] = list = new System.Collections.Generic.List<string>();
+            list.Add(fileName + ".sksl");
+        }
+
+        // 报告重复
+        foreach (var kv in classToFiles)
+        {
+            if (kv.Value.Count > 1)
+                Log.LogError("效果名称 '{0}' 在多个 .sksl 文件中重复定义：{1}", kv.Key, string.Join(", ", kv.Value));
+        }
+
+        // 为每个 @effect 生成骨架文件
+        foreach (var kv in classToFiles)
+        {
+            if (kv.Value.Count > 1) continue;
+            var className = kv.Key;
+
+            var userFile = Path.Combine(EffectsDir, className + ".cs");
+            if (File.Exists(userFile)) continue;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("using Avalonia.Controls;");
+            sb.AppendLine();
+            sb.AppendLine("namespace MediaKit.Avalonia.Effects;");
+            sb.AppendLine();
+            sb.AppendLine("/// <summary>");
+            sb.AppendLine("/// " + className + " 的用户自定义逻辑部分。");
+            sb.AppendLine("/// 属性（DirectProperty）和构造函数由 Source Generator 自动生成于 " + className + ".g.cs 中。");
+            sb.AppendLine("/// </summary>");
+            sb.AppendLine("public partial class " + className);
+            sb.AppendLine("{");
+            sb.AppendLine("    // === 生命周期 ===");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // Effect 被附加到目标控件后调用。可在此注册事件（如 PointerPressed）。");
+            sb.AppendLine("    // Target 属性此时已可用。");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // protected override void OnAttached(Control target)");
+            sb.AppendLine("    // {");
+            sb.AppendLine("    //     target.PointerPressed += OnPointerPressed;");
+            sb.AppendLine("    // }");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // Effect 即将从控件分离时调用。务必取消事件订阅。");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // protected override void OnDetaching()");
+            sb.AppendLine("    // {");
+            sb.AppendLine("    //     if (Target != null)");
+            sb.AppendLine("    //         Target.PointerPressed -= OnPointerPressed;");
+            sb.AppendLine("    // }");
+            sb.AppendLine();
+            sb.AppendLine("    // === 动画帧更新 ===");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // 每帧回调（仅在 StartAnimation() 后激活）。");
+            sb.AppendLine("    // 返回 true 继续下一帧，返回 false 停止动画。");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // protected override bool OnFrameUpdate()");
+            sb.AppendLine("    // {");
+            sb.AppendLine("    //     return false;");
+            sb.AppendLine("    // }");
+            sb.AppendLine();
+            sb.AppendLine("    // === 参数推送 ===");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // 通过 this[\"uniformName\"] = value 可随时向着色器推送参数（线程安全）。");
+            sb.AppendLine("    // 生成的属性 setter 已自动推送，仅需在帧更新等特殊路径中手动推送。");
+            sb.AppendLine("    // 示例：this[\"rotationX\"] = (float)rx;");
+            sb.AppendLine("}");
+
+            File.WriteAllText(userFile, sb.ToString(), new UTF8Encoding(false));
+            Log.LogMessage(MessageImportance.High, "Generated effect stub: " + userFile);
+        }
+
+        // 清理已不存在对应 .sksl 的用户侧 .cs 文件
+        foreach (var csFile in Directory.GetFiles(EffectsDir, "*.cs"))
+        {
+            var csClassName = Path.GetFileNameWithoutExtension(csFile);
+            if (!validClassNames.Contains(csClassName)) 
+            {
+                File.Delete(csFile);
+                Log.LogMessage(MessageImportance.High, "Removed orphaned effect stub: " + csFile);
+            }
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GenerateEffectStubFiles" BeforeTargets="CoreCompile">
+    <GenerateEffectStubs SkslFiles="@(AdditionalFiles)" EffectsDir="$(MSBuildProjectDirectory)\Effects" />
+  </Target>
+
+</Project>

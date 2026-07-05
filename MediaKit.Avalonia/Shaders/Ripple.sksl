@@ -1,0 +1,73 @@
+// @effect: RippleEffect
+uniform shader iImage;
+uniform float2 iResolution;
+uniform float2 iSourceSize;
+uniform float iTime;
+// @property: 0.0, 0.0, -10.0
+uniform float3 iRipple0; // (centerX, centerY, startTime)
+// @property: 0.0, 0.0, -10.0
+uniform float3 iRipple1;
+// @property: 0.0, 0.0, -10.0
+uniform float3 iRipple2;
+// @property: 0.0, 0.0, -10.0
+uniform float3 iRipple3;
+// @property: 0.1
+uniform float amplitude;
+// @property: 50.0
+uniform float frequency;
+// @property: 10.0
+uniform float speed;
+// @property: 3.0
+uniform float duration;
+
+float3 calcRipple(float2 uv, float2 center, float age, float aspectRatio) {
+    if (age < 0.0 || age > duration) return float3(0.0);
+
+    float timeFade = 1.0 - age / duration;
+
+    float2 diff = uv - center;
+    float dist = length(float2(diff.x, diff.y / aspectRatio));
+    if (dist < 0.001) return float3(0.0);
+
+    float2 dir = normalize(float2(diff.x, diff.y / aspectRatio));
+    dir.y *= aspectRatio;
+
+    float wavefront = age * speed * 0.03;
+    if (dist > wavefront) return float3(0.0);
+
+    float behind = wavefront - dist;
+    float envelope = exp(-behind / 0.15) * timeFade / (1.0 + dist * 4.0);
+
+    float wave = sin(frequency * dist - age * speed);
+    float displacement = amplitude * wave * envelope;
+    float light = amplitude * 0.15 * (1.0 - cos(frequency * dist - age * speed)) * envelope;
+
+    return float3(dir * displacement, light);
+}
+
+float3 calcRippleWithReflection(float2 uv, float2 center, float age, float aspectRatio) {
+    float3 result = calcRipple(uv, center, age, aspectRatio);
+    result += calcRipple(uv, float2(-center.x, center.y), age, aspectRatio) * 0.3;
+    result += calcRipple(uv, float2(2.0 - center.x, center.y), age, aspectRatio) * 0.3;
+    result += calcRipple(uv, float2(center.x, -center.y), age, aspectRatio) * 0.3;
+    result += calcRipple(uv, float2(center.x, 2.0 - center.y), age, aspectRatio) * 0.3;
+    return result;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / iResolution;
+    float aspectRatio = iResolution.x / iResolution.y;
+
+    float3 r0 = calcRippleWithReflection(uv, iRipple0.xy, iTime - iRipple0.z, aspectRatio);
+    float3 r1 = calcRippleWithReflection(uv, iRipple1.xy, iTime - iRipple1.z, aspectRatio);
+    float3 r2 = calcRippleWithReflection(uv, iRipple2.xy, iTime - iRipple2.z, aspectRatio);
+    float3 r3 = calcRippleWithReflection(uv, iRipple3.xy, iTime - iRipple3.z, aspectRatio);
+
+    float2 offset = r0.xy + r1.xy + r2.xy + r3.xy;
+    float lighting = r0.z + r1.z + r2.z + r3.z;
+
+    half4 color = iImage.eval((uv + offset) * iSourceSize);
+    color.rgb *= (1.0 - lighting);
+    return color;
+}
+

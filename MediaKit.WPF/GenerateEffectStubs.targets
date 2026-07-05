@@ -1,0 +1,125 @@
+<Project>
+
+  <UsingTask TaskName="GenerateWpfEffectStubs" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FxFiles ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <EffectsDir ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var regex = new Regex(@"^//\s*@effect\s*(?::\s*(\w+))?", RegexOptions.Multiline);
+
+        if (!Directory.Exists(EffectsDir))
+            Directory.CreateDirectory(EffectsDir);
+
+        // 收集当前所有 @effect 对应的类名，并检测重复
+        var validClassNames = new System.Collections.Generic.HashSet<string>();
+        var classToFiles = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>();
+
+        foreach (var item in FxFiles)
+        {
+            var path = item.GetMetadata("FullPath");
+            if (!File.Exists(path)) continue;
+
+            var content = File.ReadAllText(path);
+            var match = regex.Match(content);
+            if (!match.Success) continue;
+
+            var markerVal = match.Groups[1].Success ? match.Groups[1].Value : null;
+            // @effect: default → 仅注册（自包含 sealed 类），无需手写 partial，跳过骨架生成与重复检测
+            if (string.Equals(markerVal, "default", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            // 文件名派生类名时首字母大写（与源生成器 Capitalize 对齐，bg1 → Bg1Effect）
+            var className = !string.IsNullOrEmpty(markerVal)
+                ? markerVal
+                : (fileName.Length > 0 ? char.ToUpperInvariant(fileName[0]) + fileName.Substring(1) : fileName) + "Effect";
+
+            validClassNames.Add(className);
+            if (!classToFiles.TryGetValue(className, out var list))
+                classToFiles[className] = list = new System.Collections.Generic.List<string>();
+            list.Add(fileName + ".fx");
+        }
+
+        // 报告重复（与源生成器 WPFSHADER001 对齐）
+        foreach (var kv in classToFiles)
+        {
+            if (kv.Value.Count > 1)
+                Log.LogError("效果名称 '{0}' 在多个 .fx 文件中重复定义：{1}", kv.Key, string.Join(", ", kv.Value));
+        }
+
+        // 为每个 @effect 生成手写侧骨架文件（若不存在）
+        foreach (var kv in classToFiles)
+        {
+            if (kv.Value.Count > 1) continue;
+            var className = kv.Key;
+
+            var userFile = Path.Combine(EffectsDir, className + ".cs");
+            if (File.Exists(userFile)) continue;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("using System.Windows;");
+            sb.AppendLine("using System.Windows.Media.Effects;");
+            sb.AppendLine();
+            sb.AppendLine("namespace MediaKit.WPF.Effects;");
+            sb.AppendLine();
+            sb.AppendLine("/// <summary>");
+            sb.AppendLine("/// " + className + " 的用户自定义逻辑部分。");
+            sb.AppendLine("/// 基础设施（_shader / Input / 标记属性 / Target / 构造函数 / MarkupExtension）");
+            sb.AppendLine("/// 由源生成器产出于 " + className + ".g.cs。");
+            sb.AppendLine("/// </summary>");
+            sb.AppendLine("public partial class " + className + " : ShaderEffect");
+            sb.AppendLine("{");
+            sb.AppendLine("    // === 构造钩子 ===");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // 源生成器的构造函数末尾会调用 OnConstructed()。");
+            sb.AppendLine("    // 可在此推送未标记寄存器（打包 / 运行时计算 / 枚举映射）的初值，例如：");
+            sb.AppendLine("    //     UpdateShaderValue(XxxProperty);");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // partial void OnConstructed()");
+            sb.AppendLine("    // {");
+            sb.AppendLine("    // }");
+            sb.AppendLine();
+            sb.AppendLine("    // === 挂载 / 卸载 ===");
+            sb.AppendLine("    //");
+            sb.AppendLine("    // 生成侧的 Target 依赖属性在绑定完成后会自动调用 Attach / Detach，");
+            sb.AppendLine("    // 因此这两个方法必须由手写侧实现。");
+            sb.AppendLine();
+            sb.AppendLine("    public void Attach(FrameworkElement element)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        element.Effect = this;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    public void Detach()");
+            sb.AppendLine("    {");
+            sb.AppendLine("        // 取消事件订阅、释放引用等清理逻辑");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+
+            File.WriteAllText(userFile, sb.ToString(), new UTF8Encoding(false));
+            Log.LogMessage(MessageImportance.High, "Generated effect stub: " + userFile);
+        }
+
+        // 清理已不存在对应 .fx 的孤立用户侧 .cs 文件
+        foreach (var csFile in Directory.GetFiles(EffectsDir, "*.cs"))
+        {
+            var csClassName = Path.GetFileNameWithoutExtension(csFile);
+            if (!validClassNames.Contains(csClassName))
+            {
+                File.Delete(csFile);
+                Log.LogMessage(MessageImportance.High, "Removed orphaned effect stub: " + csFile);
+            }
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GenerateWpfEffectStubFiles" BeforeTargets="CoreCompile">
+    <GenerateWpfEffectStubs FxFiles="@(AdditionalFiles)" EffectsDir="$(MSBuildProjectDirectory)\Effects" />
+  </Target>
+
+</Project>

@@ -1,5 +1,4 @@
-#define PI 3.1415926535897932384626433832795
-#define DEG2RAD  0.01745329251994329576923690768489
+// @effect: PanoEffect
 
 //rotationX,rotationY,zoom,fov
 float4 params : register(C0) = float4(0.5, 0.5, 0.5, 90.0);
@@ -8,6 +7,9 @@ float4 params : register(C0) = float4(0.5, 0.5, 0.5, 90.0);
 float3 view : register(C1) = float3(1.0, 1.0, 1.0);
 
 sampler2D input : register(S0);
+
+#define PI 3.1415926535897932384626433832795
+#define DEG2RAD  0.01745329251994329576923690768489
 
 float3 rotateXY(float3 p, float2 angle)
 {

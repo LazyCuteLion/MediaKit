@@ -1,0 +1,46 @@
+// @effect: PanoEffect
+uniform shader iImage;
+uniform float2 iResolution;
+uniform float2 iSourceSize;
+// @property: 0.5
+uniform float rotationX;
+// @property: 0.5
+uniform float rotationY;
+// @property: 0.5
+uniform float zoom;
+// @property: 90.0
+uniform float fov;
+
+const float PI = 3.1415926535897932;
+const float DEG2RAD = 0.01745329251994329;
+
+float3 rotateXY(float3 p, float2 angle) {
+    float2 c = cos(angle);
+    float2 s = sin(angle);
+    p = float3(p.x, c.x * p.y + s.x * p.z, -s.x * p.y + c.x * p.z);
+    return float3(c.y * p.x + s.y * p.z, p.y, -s.y * p.x + c.y * p.z);
+}
+
+half4 main(float2 fragCoord) {
+    float2 sampleUV = fragCoord / iResolution - 0.5;
+
+    float hfovRad = fov * DEG2RAD;
+    float vfovRad = 2.0 * atan(tan(hfovRad * 0.5) * iResolution.y / iResolution.x);
+
+    float3 camDir = normalize(float3(
+        -sampleUV.x * tan(hfovRad * 0.5),
+        sampleUV.y * tan(vfovRad * 0.5),
+        zoom
+    ));
+
+    float3 camRot = float3(
+        (rotationX - 0.5) * 2.0 * PI,
+        (rotationY - 0.5) * PI,
+        0.0
+    );
+
+    float3 rd = normalize(rotateXY(camDir, camRot.yx));
+    float2 texCoord = float2(atan(rd.z, rd.x) + PI, acos(-rd.y)) / float2(2.0 * PI, PI);
+
+    return iImage.eval(texCoord * iSourceSize);
+}

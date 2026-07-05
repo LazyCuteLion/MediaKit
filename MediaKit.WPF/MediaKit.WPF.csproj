@@ -21,25 +21,35 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- HLSL 编译: .fx → .ps (ps_3_0) -->
+  <!-- HLSL 编译: Shaders 下所有 .fx 自动纳入，无需逐个指定 -->
   <ItemGroup>
-    <HlslShader Include="Shaders\Alpha.fx" OutputName="Compiled\Alpha.ps" />
-    <HlslShader Include="Shaders\Tile.fx" OutputName="Compiled\Tile.ps" />
-    <HlslShader Include="Shaders\Pano.fx" OutputName="Compiled\Pano.ps" />
+    <HlslShader Include="Shaders\*.fx" />
   </ItemGroup>
 
-  <Target Name="CompileShaders" BeforeTargets="BeforeBuild" Inputs="@(HlslShader)" Outputs="@(HlslShader->'$(ProjectDir)Shaders\%(OutputName)')" Condition="Exists('$(FxcPath)')">
-    <Exec Command="&quot;$(FxcPath)&quot; /T ps_3_0 /E main /Fo &quot;$(ProjectDir)Shaders\%(HlslShader.OutputName)&quot; &quot;%(HlslShader.FullPath)&quot;" />
+  <!-- .fx → Compiled\{文件名}.ps (ps_3_0)：按文件名自动派生输出，增量编译 -->
+  <Target Name="CompileShaders" BeforeTargets="RegisterCompiledShaders" Inputs="@(HlslShader)" Outputs="@(HlslShader->'$(ProjectDir)Shaders\Compiled\%(Filename).ps')" Condition="Exists('$(FxcPath)')">
+    <MakeDir Directories="$(ProjectDir)Shaders\Compiled" />
+    <Exec Command="&quot;$(FxcPath)&quot; /T ps_3_0 /E main /Fo &quot;$(ProjectDir)Shaders\Compiled\%(HlslShader.Filename).ps&quot; &quot;%(HlslShader.FullPath)&quot;" />
   </Target>
 
-  <ItemGroup>
-    <Resource Include="Shaders\Compiled\Alpha.ps" />
-    <Resource Include="Shaders\Compiled\Tile.ps" />
-    <Resource Include="Shaders\Compiled\Pano.ps" />
-  </ItemGroup>
+  <!-- 由 HlslShader 列表派生 Resource（每次构建都注册，规避通配陷阱与增量跳过导致的资源丢失） -->
+  <Target Name="RegisterCompiledShaders" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <Resource Include="@(HlslShader->'Shaders\Compiled\%(Filename).ps')" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
+
+  <!-- 源生成器：.fx 作为 AdditionalFiles 喂给生成器，按标记产出效果类样板 -->
+  <ItemGroup>
+    <AdditionalFiles Include="Shaders\*.fx" />
+    <ProjectReference Include="..\MediaKit.ShaderEffectGenerators\MediaKit.ShaderEffectGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- 编译前为每个 @effect 生成/清理手写侧骨架 .cs -->
+  <Import Project="GenerateEffectStubs.targets" />
 
 </Project>

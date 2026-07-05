@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MediaKit.Avalonia</RootNamespace>
+    <EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>
+
+    <!-- NuGet -->
+    <PackageId>MediaKit.Avalonia</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>LazyCuteLion</Authors>
+    <Description>Avalonia pixel shader effects library providing Alpha channel separation, 360 panoramic projection, video tiling, and ripple effects via SkSL runtime shaders.</Description>
+    <PackageTags>Avalonia;Shader;SkSL;Alpha;360Video;Panorama;Tile;Ripple;PixelShader</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/LazyCuteLion/MediaKit</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/LazyCuteLion/MediaKit</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Skia" Version="12.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Shaders\*.sksl" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaKit.ShaderEffectGenerators\MediaKit.ShaderEffectGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Import Project="GenerateEffectStubs.targets" />
+
+</Project>

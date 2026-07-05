@@ -1,8 +1,12 @@
+// @effect: TileEffect
 sampler2D input : register(s0);
 
+// @property: Rows = 1.0
 float rows : register(c0) = float(1.0);
+// @property: Columns = 1.0
 float columns : register(c1) = float(1.0);
 float2 spacing : register(c2) = float2(0.0, 0.0); // UV space (x, y)
+// @property: SpacingColor : Color = Transparent
 float4 spacingColor : register(c3) = float4(0, 0, 0, 0);
 float aspectRatio : register(c4) = float(1.0); // targetAspect / videoAspect
 
