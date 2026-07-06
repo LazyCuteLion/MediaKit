@@ -394,8 +394,9 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
                 };
             }
         }
-
+        
         _canvasDevice = CanvasDevice.GetSharedDevice();
+        _canvasDevice.DeviceLost += OnDeviceLost;
 
         var elementVisual = ElementCompositionPreview.GetElementVisual(this);
         _compositor = elementVisual.Compositor;
@@ -446,11 +447,47 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
             _player.Dispose();
             _player = null;
         }
+        if (_canvasDevice != null)
+        {
+            _canvasDevice.DeviceLost -= OnDeviceLost;
+        }
         _panoEffect?.Dispose();
         _panoEffect = null;
         _videoFrameBuffer?.Dispose();
         _videoFrameBuffer = null;
         _tracker = null;
+    }
+
+    /// <summary>
+    /// GPU 设备丢失恢复。重建 CanvasDevice 和设备绑定资源，PixelShaderEffect 保持复用。
+    /// </summary>
+    private void OnDeviceLost(CanvasDevice sender, object args)
+    {
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            // 旧设备取消订阅
+            sender.DeviceLost -= OnDeviceLost;
+
+            // 获取新设备
+            _canvasDevice = CanvasDevice.GetSharedDevice();
+            _canvasDevice.DeviceLost += OnDeviceLost;
+
+            // 热替换 CompositionGraphicsDevice 底层设备（DrawingSurface/SpriteVisual 保持不变）
+            if (_graphicsDevice != null)
+                CanvasComposition.SetCanvasDevice(_graphicsDevice, _canvasDevice);
+
+            // 重建帧缓冲（设备绑定的 GPU 纹理）
+            _videoFrameBuffer?.Dispose();
+            if (_videoWidth > 0 && _videoHeight > 0)
+            {
+                _videoFrameBuffer = new CanvasRenderTarget(
+                    _canvasDevice, _videoWidth, _videoHeight, 96f,
+                    Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                    CanvasAlphaMode.Premultiplied);
+            }
+
+            // 下一帧 VideoFrameAvailable 会自动驱动渲染恢复
+        });
     }
 
     #endregion
@@ -573,9 +610,14 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
             }
 #endif
         }
+        catch (Exception ex) when (_canvasDevice != null && _canvasDevice.IsDeviceLost(ex.HResult))
+        {
+            // 设备丢失，通知 CanvasDevice 触发 DeviceLost 事件进入恢复流程
+            _canvasDevice.RaiseDeviceLost();
+        }
         catch
         {
-            // Ignore rendering errors during transitions
+            // 非设备丢失的渲染异常（如过渡期间资源暂不可用），静默忽略
         }
     }
 
