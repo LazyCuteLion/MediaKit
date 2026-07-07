@@ -1,22 +1,14 @@
 #define PI 3.1415926535897932384626433832795
-#define DEG2RAD 0.01745329251994329576923690768489
 
 cbuffer constants : register(b0)
 {
-    float4 panoParams;      // rotationX, rotationY, zoom, fov
-    float3 view; // scaleX(view.width/source.width),scaleY(view.height/source.height),aspectRatio(view.width/view.height)
+    float4 viewParams;   // x=scaleX, y=scaleY, z=zoom, w=(未用)
+    float4 fovTan;       // x=tan(hfov/2), y=tan(vfov/2), z/w=（未用）
+    float4 rotSinCos;    // x=sin(pitch), y=cos(pitch), z=sin(yaw), w=cos(yaw)
 };
 
 Texture2D<float4> inputTexture : register(t0);
 SamplerState inputSampler : register(s0);
-
-float3 rotateXY(float3 p, float2 angle)
-{
-    float2 c = cos(angle);
-    float2 s = sin(angle);
-    p = float3(p.x, c.x * p.y + s.x * p.z, -s.x * p.y + c.x * p.z);
-    return float3(c.y * p.x + s.y * p.z, p.y, -s.y * p.x + c.y * p.z);
-}
 
 float4 main(
     float4 pos : SV_POSITION,
@@ -24,36 +16,35 @@ float4 main(
     float2 uv : TEXCOORD0
 ) : SV_Target
 {
-    float rotationX = panoParams.x;
-    float rotationY = panoParams.y;
-    float zoom = panoParams.z;
-    float fov = panoParams.w;
-    
-    float scaleX = view.x;
-    float scaleY = view.y;
-    float aspectRatio = view.z;
+    // 所有仅依赖 uniform（视角/FOV）的量已在 CPU 端每帧预计算并经 cbuffer 传入，
+    // 避免在每个像素重复计算 tan/atan/sin/cos 等昂贵的超越函数。
+    float scaleX = viewParams.x;
+    float scaleY = viewParams.y;
+    float zoom = viewParams.z;
+    float tanHalfH = fovTan.x;
+    float tanHalfV = fovTan.y;
 
     if (uv.x > scaleX || uv.y > scaleY)
         return float4(0, 0, 0, 0);
 
     float2 sampleUV = float2(uv.x / scaleX - 0.5, uv.y / scaleY - 0.5);
 
-    float hfovRad = fov * DEG2RAD;
-    float vfovRad = 2.0 * atan(tan(hfovRad * 0.5) / aspectRatio);
-
+    // 相机方向（视口射线）
     float3 camDir = normalize(float3(
-        -sampleUV.x * tan(hfovRad * 0.5),
-        sampleUV.y * tan(vfovRad * 0.5),
+        -sampleUV.x * tanHalfH,
+        sampleUV.y * tanHalfV,
         zoom
     ));
 
-    float3 camRot = float3(
-        (rotationX - 0.5) * 2.0 * PI,
-        (rotationY - 0.5) * PI,
-        0.0
-    );
+    // 绕 X（俯仰 pitch）、Y（偏航 yaw）旋转，使用预计算的 sin/cos，等价于原 rotateXY(camDir, camRot.yx)
+    float sp = rotSinCos.x; // sin(pitch)
+    float cp = rotSinCos.y; // cos(pitch)
+    float sy = rotSinCos.z; // sin(yaw)
+    float cy = rotSinCos.w; // cos(yaw)
+    float3 t = float3(camDir.x, cp * camDir.y + sp * camDir.z, -sp * camDir.y + cp * camDir.z);
+    float3 rd = normalize(float3(cy * t.x + sy * t.z, t.y, -sy * t.x + cy * t.z));
 
-    float3 rd = normalize(rotateXY(camDir, camRot.yx));
+    // 球面方向 → 等距柱状投影纹理坐标
     float2 texCoord = float2(atan2(rd.z, rd.x) + PI, acos(-rd.y)) / float2(2.0 * PI, PI);
 
     return inputTexture.Sample(inputSampler, texCoord);

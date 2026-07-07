@@ -1,10 +1,8 @@
-using System;
-using System.Numerics;
-using System.Reflection;
-using System.Windows.Input;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
+using Microsoft.Graphics.Canvas.UI;
 using Microsoft.Graphics.Canvas.UI.Composition;
+using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.Graphics.DirectX;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -14,6 +12,11 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using System;
+using System.Numerics;
+using System.Reflection;
+using System.Windows.Input;
+using Windows.Foundation;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 
@@ -21,45 +24,43 @@ namespace MediaKit.WinUI3;
 
 /// <summary>
 /// 360 全景视频播放控件。
-/// 基于 Composition API + Win2D PixelShaderEffect 实现球面投影渲染。
+/// 基于 CanvasAnimatedControl + Win2D PixelShaderEffect 实现球面投影渲染。
 /// 内置鼠标拖拽旋转和滚轮缩放交互。
 /// </summary>
-public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
+public sealed class PanoMediaElement : Panel
 {
-    // Composition
-    private Compositor? _compositor;
-    private SpriteVisual? _spriteVisual;
-    private CompositionDrawingSurface? _drawingSurface;
-    private CompositionGraphicsDevice? _graphicsDevice;
-
-    // Win2D
-    private CanvasDevice? _canvasDevice;
-    private CanvasRenderTarget? _videoFrameBuffer;
+    private CanvasAnimatedControl? _canvas;
     private PixelShaderEffect? _panoEffect;
+    private CanvasRenderTarget? _frameBuffer;
+    private volatile bool _frameAvailable;   // 有新视频帧待拉取（媒体线程置位，渲染线程消费）
+    private volatile bool _needRebuild;      // 视频尺寸/设备变化，需在渲染线程重建帧缓冲
 
-    // Media
+    // 视角参数镜像，供渲染线程读取（避免非 UI 线程访问依赖属性）
+    private volatile float _viewRotationX = 0.5f;
+    private volatile float _viewRotationY = 0.5f;
+    private volatile float _viewZoom = 0.5f;
+    private volatile float _viewFov = 90f;
+    private volatile bool _isParamsUpdatting = false;
+
     private MediaPlayer? _player;
     private int _videoWidth;
     private int _videoHeight;
     private bool _isInternalPositionUpdate;
-    private DateTimeOffset _lastExternalSeekTime; // 防抖：最近一次外部 Seek 的时间戳
+    private DateTimeOffset _lastExternalSeekTime; // 最近一次外部 Seek 时间戳（回写防抖）
 
 #if DEBUG
-    // FPS
+    private readonly System.Diagnostics.Stopwatch _fpsStopwatch = System.Diagnostics.Stopwatch.StartNew();
     private int _frameCount;
-    private DateTimeOffset _lastFpsTick;
 #endif
 
-    // Interaction
-    private const float TrackerScale = 5000f;
-    private InteractionTracker? _tracker;
-    private Vector3 _lastTrackerPosition;
+    // 拖拽 + 帧循环惯性
     private bool _isPointerPressed;
-    private Windows.Foundation.Point _lastPointerPos;
+    private Point _lastPointerPos;
     private DateTimeOffset _lastTime;
-    private double _velocityX;
-    private double _velocityY;
-    private bool _suppressRender;
+    private double _velocityX; // 旋转量/毫秒
+    private double _velocityY; // 旋转量/毫秒
+    private volatile bool _inertiaRunning;
+    private DateTimeOffset _lastInertiaTime;
 
     /// <summary>初始化 PanoMediaElement 实例。</summary>
     public PanoMediaElement()
@@ -69,10 +70,10 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
         StopCommand = new RelayCommand(Stop);
         ResetCommand = new RelayCommand(Reset);
 
-        Background = new SolidColorBrush(Colors.Transparent);
+        SyncViewParams();
+
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
-        SizeChanged += OnSizeChanged;
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
@@ -119,7 +120,7 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
     /// <summary>是否正在播放。</summary>
     public static readonly DependencyProperty IsPlayingProperty =
         DependencyProperty.Register(nameof(IsPlaying), typeof(bool), typeof(PanoMediaElement),
-            new PropertyMetadata(false));
+            new PropertyMetadata(false, OnIsPlayingChanged));
 
     /// <summary>音量 [0.0, 1.0]，默认 1.0。</summary>
     public static readonly DependencyProperty VolumeProperty =
@@ -263,18 +264,16 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
     /// <summary>重置视角参数为默认值。</summary>
     public void Reset()
     {
-        _suppressRender = true;
+        StopInertia();
+        _velocityX = 0;
+        _velocityY = 0;
+        _isParamsUpdatting = true;
         Fov = 90.0;
         Zoom = 0.5;
         RotationX = 0.5;
         RotationY = 0.5;
-        _suppressRender = false;
-        if (_tracker != null)
-        {
-            _lastTrackerPosition = _tracker.Position;
-            _tracker.TryUpdatePosition(_tracker.Position);
-        }
-        RenderFrame();
+        _isParamsUpdatting = false;
+        SyncViewParams();
     }
 
     #endregion
@@ -300,7 +299,6 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 
             c._lastExternalSeekTime = DateTimeOffset.Now;
 
-            // 同步 Progress
             c._isInternalPositionUpdate = true;
             if (c.Duration.TotalSeconds > 0)
                 c.Progress = position.TotalSeconds / c.Duration.TotalSeconds * 100.0;
@@ -354,10 +352,31 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
             c._player.IsLoopingEnabled = (bool)e.NewValue;
     }
 
+    /// <summary>视角参数变更时同步镜像字段。</summary>
     private static void OnViewParamChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is PanoMediaElement c && !c._suppressRender)
-            c.RenderFrame();
+        if (d is PanoMediaElement c)
+            c.SyncViewParams();
+    }
+
+    /// <summary>视角依赖属性同步到镜像字段，并补画一帧。</summary>
+    private void SyncViewParams()
+    {
+        if (_isParamsUpdatting)
+            return;
+        _viewRotationX = (float)RotationX;
+        _viewRotationY = (float)RotationY;
+        _viewZoom = (float)Zoom;
+        _viewFov = (float)Fov;
+        _canvas?.Invalidate();
+    }
+
+    private static void OnIsPlayingChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PanoMediaElement c)
+        {
+            c._canvas!.Paused = !(bool)e.NewValue && !c._inertiaRunning;
+        }
     }
 
     #endregion
@@ -367,8 +386,6 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         InitializeRendering();
-        if (ActualWidth > 0 && ActualHeight > 0)
-            ResizeDrawingSurface(ActualWidth, ActualHeight);
         if (Source != null)
             ApplySource(Source);
     }
@@ -378,55 +395,60 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
         CleanUp();
     }
 
+    /// <summary>
+    /// 测量：Panel 基类不实现布局（默认返回 0），这里手动重写，
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        double childW = 0, childH = 0;
+        foreach (var child in Children)
+        {
+            child.Measure(availableSize);
+            childW = Math.Max(childW, child.DesiredSize.Width);
+            childH = Math.Max(childH, child.DesiredSize.Height);
+        }
+        // 可用尺寸为无穷时（如置于 ScrollViewer/StackPanel），退回子元素期望尺寸，避免返回无穷引发异常
+        return new Size(
+            double.IsInfinity(availableSize.Width) ? childW : availableSize.Width,
+            double.IsInfinity(availableSize.Height) ? childH : availableSize.Height);
+    }
+
+    /// <summary>
+    /// 排列：把唯一的子元素放置到填满整个可用区域。
+    /// </summary>
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var rect = new Rect(0, 0, finalSize.Width, finalSize.Height);
+        foreach (var child in Children)
+        {
+            child.Arrange(rect);
+        }
+        return finalSize;
+    }
+
     private void InitializeRendering()
     {
-        // 从嵌入资源加载预编译着色器，创建 PixelShaderEffect（仅一次）
-        using (var stream = typeof(PanoMediaElement).Assembly
-            .GetManifestResourceStream("Pano.cso"))
+        if (_canvas != null) return;
+
+        _canvas = new CanvasAnimatedControl
         {
-            if (stream != null)
-            {
-                var shaderBytes = new byte[stream.Length];
-                stream.ReadExactly(shaderBytes);
-                _panoEffect = new PixelShaderEffect(shaderBytes)
-                {
-                    Source1BorderMode = EffectBorderMode.Hard
-                };
-            }
-        }
-        
-        _canvasDevice = CanvasDevice.GetSharedDevice();
-        _canvasDevice.DeviceLost += OnDeviceLost;
+            ClearColor = Colors.Black,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            IsFixedTimeStep = false,
+            Paused = true
+        };
+        _canvas.CreateResources += OnCreateResources;
+        _canvas.Draw += OnDraw;
+        Children.Add(_canvas);
 
-        var elementVisual = ElementCompositionPreview.GetElementVisual(this);
-        _compositor = elementVisual.Compositor;
-        _graphicsDevice = CanvasComposition.CreateCompositionGraphicsDevice(_compositor, _canvasDevice);
-
-        _drawingSurface = _graphicsDevice.CreateDrawingSurface(
-            new Windows.Foundation.Size(1, 1),
-            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-            DirectXAlphaMode.Premultiplied);
-
-        var surfaceBrush = _compositor.CreateSurfaceBrush(_drawingSurface);
-        surfaceBrush.Stretch = CompositionStretch.Fill;
-
-        _spriteVisual = _compositor.CreateSpriteVisual();
-        _spriteVisual.Brush = surfaceBrush;
-        _spriteVisual.Size = new Vector2((float)ActualWidth, (float)ActualHeight);
-
-        ElementCompositionPreview.SetElementChildVisual(this, _spriteVisual);
-
-        // InteractionTracker：系统级惯性动画
-        _tracker = InteractionTracker.CreateWithOwner(_compositor, this);
-        _tracker.MinPosition = new Vector3(float.MinValue);
-        _tracker.MaxPosition = new Vector3(float.MaxValue);
-        _tracker.PositionInertiaDecayRate = new Vector3(0.8f, 0.8f, 0f);
-
-        _player = new MediaPlayer();
-        _player.IsVideoFrameServerEnabled = true;
-        _player.Volume = Volume;
-        _player.IsMuted = IsMuted;
-        _player.IsLoopingEnabled = IsLooping;
+        _player = new MediaPlayer
+        {
+            IsVideoFrameServerEnabled = true,
+            Volume = Volume,
+            IsMuted = IsMuted,
+            IsLoopingEnabled = IsLooping
+        };
         _player.PlaybackSession.PlaybackRate = PlaybackRate;
         _player.VideoFrameAvailable += OnVideoFrameAvailable;
         _player.MediaOpened += OnPlayerMediaOpened;
@@ -437,6 +459,18 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 
     private void CleanUp()
     {
+        StopInertia();
+
+        // 先移除画布停止渲染循环，再释放播放器与帧缓冲，避免渲染线程仍在拉帧/绘制时资源被销毁
+        if (_canvas != null)
+        {
+            _canvas.Paused = true;
+            _canvas.CreateResources -= OnCreateResources;
+            _canvas.Draw -= OnDraw;
+            _canvas.RemoveFromVisualTree();
+            _canvas = null;
+        }
+
         if (_player != null)
         {
             _player.PlaybackSession.PositionChanged -= OnPlaybackPositionChanged;
@@ -447,47 +481,58 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
             _player.Dispose();
             _player = null;
         }
-        if (_canvasDevice != null)
-        {
-            _canvasDevice.DeviceLost -= OnDeviceLost;
-        }
+
         _panoEffect?.Dispose();
         _panoEffect = null;
-        _videoFrameBuffer?.Dispose();
-        _videoFrameBuffer = null;
-        _tracker = null;
+        _frameBuffer?.Dispose();
+        _frameBuffer = null;
     }
 
     /// <summary>
-    /// GPU 设备丢失恢复。重建 CanvasDevice 和设备绑定资源，PixelShaderEffect 保持复用。
+    /// 创建/重建设备资源（首次加载与设备丢失后由 CanvasAnimatedControl 触发）。
+    /// 着色器为设备无关，仅建一次；帧缓冲为设备绑定纹理，每次都重建。
     /// </summary>
-    private void OnDeviceLost(CanvasDevice sender, object args)
+    private void OnCreateResources(CanvasAnimatedControl sender, CanvasCreateResourcesEventArgs args)
     {
-        DispatcherQueue?.TryEnqueue(() =>
+        if (_panoEffect == null)
         {
-            // 旧设备取消订阅
-            sender.DeviceLost -= OnDeviceLost;
-
-            // 获取新设备
-            _canvasDevice = CanvasDevice.GetSharedDevice();
-            _canvasDevice.DeviceLost += OnDeviceLost;
-
-            // 热替换 CompositionGraphicsDevice 底层设备（DrawingSurface/SpriteVisual 保持不变）
-            if (_graphicsDevice != null)
-                CanvasComposition.SetCanvasDevice(_graphicsDevice, _canvasDevice);
-
-            // 重建帧缓冲（设备绑定的 GPU 纹理）
-            _videoFrameBuffer?.Dispose();
-            if (_videoWidth > 0 && _videoHeight > 0)
+            using var stream = typeof(PanoMediaElement).Assembly.GetManifestResourceStream("Pano.cso");
+            if (stream != null)
             {
-                _videoFrameBuffer = new CanvasRenderTarget(
-                    _canvasDevice, _videoWidth, _videoHeight, 96f,
-                    Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                    CanvasAlphaMode.Premultiplied);
+                var shaderBytes = new byte[stream.Length];
+                stream.ReadExactly(shaderBytes);
+                _panoEffect = new PixelShaderEffect(shaderBytes)
+                {
+                    Source1BorderMode = EffectBorderMode.Hard
+                };
             }
+        }
 
-            // 下一帧 VideoFrameAvailable 会自动驱动渲染恢复
-        });
+        _needRebuild = false;
+        RebuildBuffer(sender.Device);
+    }
+
+    /// <summary>
+    /// 重建帧缓冲。
+    /// </summary>
+    private void RebuildBuffer(CanvasDevice device)
+    {
+        if (_videoWidth == 0 || _videoHeight == 0)
+            return;
+        if (_frameBuffer != null)
+        {
+            // 设备与尺寸都未变则复用
+            if (_frameBuffer.Device == device
+                && (int)_frameBuffer.SizeInPixels.Width == _videoWidth
+                && (int)_frameBuffer.SizeInPixels.Height == _videoHeight)
+                return;
+            _frameBuffer.Dispose();
+            _frameBuffer = null;
+        }
+        _frameBuffer = new CanvasRenderTarget(
+            device, _videoWidth, _videoHeight, 96f,
+            Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized,
+            CanvasAlphaMode.Premultiplied);
     }
 
     #endregion
@@ -539,11 +584,8 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
             NaturalVideoHeight = _videoHeight;
             Duration = sender.PlaybackSession.NaturalDuration;
 
-            _videoFrameBuffer?.Dispose();
-            _videoFrameBuffer = new CanvasRenderTarget(
-                _canvasDevice!, _videoWidth, _videoHeight, 96f,
-                Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                CanvasAlphaMode.Premultiplied);
+            _needRebuild = true;
+            _canvas?.Invalidate();
 
             MediaOpened?.Invoke(this, EventArgs.Empty);
         });
@@ -571,82 +613,72 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 
     #region Rendering
 
+    /// <summary>视频新帧到达（媒体线程）：仅置标记并请求重绘，真正的 CopyFrameToVideoSurface
+    /// 延后到渲染线程 OnDraw 执行，确保拉帧与绘制都在渲染线程单线程访问 GPU，避免跨线程并发导致访问违例。</summary>
     private void OnVideoFrameAvailable(MediaPlayer sender, object args)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _player?.CopyFrameToVideoSurface(_videoFrameBuffer);
-            RenderFrame();
-        });
+        _frameAvailable = true;
+        _canvas?.Invalidate();
     }
 
-    private void RenderFrame()
+    /// <summary>渲染线程回调：帧缓冲经全景着色器绘制到当前帧。</summary>
+    private void OnDraw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
-        var buffer = _videoFrameBuffer;
-        if (_drawingSurface == null || _panoEffect == null ||
-            buffer == null || _player == null) return;
-
-        try
+        if (_needRebuild)
         {
-            _panoEffect.Source1 = buffer;
-            _panoEffect.Properties["panoParams"] = new Vector4(
-                (float)RotationX, (float)RotationY, (float)Zoom, (float)Fov);
-            _panoEffect.Properties["view"] = new Vector3(
-                (float)(this.ActualWidth / _videoWidth),
-                (float)(this.ActualHeight / _videoHeight),
-                (float)(this.ActualWidth / this.ActualHeight));
+            _needRebuild = false;
+            RebuildBuffer(sender.Device);
+        }
 
-            using var ds = CanvasComposition.CreateDrawingSession(_drawingSurface);
-            ds.DrawImage(_panoEffect);
+        if (_frameBuffer == null)
+            return;
+
+        var size = sender.Size;
+        if (size.Width <= 0 || size.Height <= 0 || _videoWidth == 0 || _videoHeight == 0) return;
+
+        OnInertia();
+
+        var player = _player;
+        if (_frameAvailable && player != null)
+        {
+            _frameAvailable = false;
+            player.CopyFrameToVideoSurface(_frameBuffer);
+        }
+
+        var effect = _panoEffect;
+        if (effect == null) return;
+
+        effect.Source1 = _frameBuffer;
+
+        #region 预计算仅依赖视角/FOV 的量（每帧一次），避免在 shader 中逐像素重复计算超越函数
+        float scaleX = (float)(size.Width / _videoWidth);
+        float scaleY = (float)(size.Height / _videoHeight);
+        float aspect = (float)(size.Width / size.Height);
+        float hfovRad = _viewFov * (float)(Math.PI / 180.0);
+        float tanHalfH = MathF.Tan(hfovRad * 0.5f);
+        float vfovRad = 2f * MathF.Atan(tanHalfH / aspect);
+        float tanHalfV = MathF.Tan(vfovRad * 0.5f);
+        float pitch = (_viewRotationY - 0.5f) * MathF.PI;
+        float yaw = (_viewRotationX - 0.5f) * 2f * MathF.PI;
+        #endregion
+
+        effect.Properties["viewParams"] = new Vector4(scaleX, scaleY, _viewZoom, 0f);
+        effect.Properties["fovTan"] = new Vector4(tanHalfH, tanHalfV, 0f, 0f);
+        effect.Properties["rotSinCos"] = new Vector4(
+            MathF.Sin(pitch), MathF.Cos(pitch), MathF.Sin(yaw), MathF.Cos(yaw));
+
+        args.DrawingSession.DrawImage(effect);
 
 #if DEBUG
-            _frameCount++;
-            var now = DateTimeOffset.Now;
-            if ((now - _lastFpsTick).TotalMilliseconds >= 1000)
-            {
-                System.Diagnostics.Debug.WriteLine($"FPS: {_frameCount * 1000.0 / (now - _lastFpsTick).TotalMilliseconds:f1}");
-                _frameCount = 0;
-                _lastFpsTick = now;
-            }
+        _frameCount++;
+        if (_fpsStopwatch.Elapsed.TotalMilliseconds >= 1000)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"真实帧率: {_frameCount * 1000.0 / _fpsStopwatch.Elapsed.TotalMilliseconds:f1} fps");
+            _frameCount = 0;
+            _fpsStopwatch.Restart();
+        }
 #endif
-        }
-        catch (Exception ex) when (_canvasDevice != null && _canvasDevice.IsDeviceLost(ex.HResult))
-        {
-            // 设备丢失，通知 CanvasDevice 触发 DeviceLost 事件进入恢复流程
-            _canvasDevice.RaiseDeviceLost();
-        }
-        catch
-        {
-            // 非设备丢失的渲染异常（如过渡期间资源暂不可用），静默忽略
-        }
-    }
-
-    #endregion
-
-    #region Size Changed
-
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        var width = e.NewSize.Width;
-        var height = e.NewSize.Height;
-        if (width <= 0 || height <= 0) return;
-
-        if (_spriteVisual != null)
-            _spriteVisual.Size = new Vector2((float)width, (float)height);
-
-        ResizeDrawingSurface(width, height);
-        RenderFrame();
-    }
-
-    private void ResizeDrawingSurface(double width, double height)
-    {
-        if (_drawingSurface == null) return;
-        var scale = XamlRoot?.RasterizationScale ?? 1.0;
-        _drawingSurface.Resize(new Windows.Graphics.SizeInt32
-        {
-            Width = Math.Max(1, (int)(width * scale)),
-            Height = Math.Max(1, (int)(height * scale))
-        });
     }
 
     #endregion
@@ -655,17 +687,13 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        _canvas!.Paused = false;
         _isPointerPressed = true;
         _lastPointerPos = e.GetCurrentPoint(this).Position;
         _lastTime = DateTimeOffset.Now;
         _velocityX = 0;
         _velocityY = 0;
-        // 停止正在进行的惯性
-        if (_tracker != null)
-        {
-            _lastTrackerPosition = _tracker.Position;
-            _tracker.TryUpdatePosition(_tracker.Position);
-        }
+        StopInertia();
         CapturePointer(e.Pointer);
     }
 
@@ -684,7 +712,6 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
         var h = ActualHeight;
         if (w <= 0 || h <= 0) return;
 
-        // 用指数平滑稳定速度，避免单帧抖动导致初速不准
         var instantVx = dx / w * 0.5 / dt;
         var instantVy = -dy / h * 0.5 / dt;
         const double alpha = 0.4;
@@ -698,14 +725,14 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
         if (rx < 0.0f) rx += 1.0f;
         ry = Math.Clamp(ry, 0.01f, 0.99f);
 
-        _suppressRender = true;
+        _isParamsUpdatting = true;
         RotationX = rx;
         RotationY = ry;
-        _suppressRender = false;
+        _isParamsUpdatting = false;
+        this.SyncViewParams();
+
         _lastPointerPos = pos;
         _lastTime = now;
-
-        RenderFrame();
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -713,15 +740,11 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
         _isPointerPressed = false;
         ReleasePointerCapture(e.Pointer);
 
-        // 注入速度到 InteractionTracker，由系统处理惯性
         var speed = Math.Sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
-        if (speed > 0.0001 && _tracker != null)
-        {
-            _lastTrackerPosition = _tracker.Position;
-            _tracker.TryUpdatePositionWithAdditionalVelocity(
-                new Vector3((float)(_velocityX * 1000 * TrackerScale),
-                            (float)(_velocityY * 1000 * TrackerScale), 0));
-        }
+        if (speed > 0.0001)
+            StartInertia();
+        else if (!IsPlaying)
+            _canvas!.Paused = true;
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -732,38 +755,63 @@ public sealed class PanoMediaElement : Panel, IInteractionTrackerOwner
 
     #endregion
 
-    #region IInteractionTrackerOwner
+    #region Inertia
 
-    void IInteractionTrackerOwner.ValuesChanged(InteractionTracker sender, InteractionTrackerValuesChangedArgs args)
+    /// <summary>启动帧循环惯性</summary>
+    private void StartInertia()
     {
-        var delta = args.Position - _lastTrackerPosition;
-        _lastTrackerPosition = args.Position;
-
-        if (Math.Abs(delta.X) < 0.0001 && Math.Abs(delta.Y) < 0.0001) return;
-
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            var rx = RotationX + delta.X / TrackerScale;
-            var ry = RotationY + delta.Y / TrackerScale;
-
-            if (rx > 1.0) rx -= 1.0;
-            if (rx < 0.0) rx += 1.0;
-            ry = Math.Clamp(ry, 0.01, 0.99);
-
-            _suppressRender = true;
-            RotationX = rx;
-            RotationY = ry;
-            _suppressRender = false;
-
-            RenderFrame();
-        });
+        if (_inertiaRunning) return;
+        _inertiaRunning = true;
+        _lastInertiaTime = DateTimeOffset.Now;
+        _canvas!.Paused = false;
     }
 
-    void IInteractionTrackerOwner.CustomAnimationStateEntered(InteractionTracker sender, InteractionTrackerCustomAnimationStateEnteredArgs args) { }
-    void IInteractionTrackerOwner.IdleStateEntered(InteractionTracker sender, InteractionTrackerIdleStateEnteredArgs args) { }
-    void IInteractionTrackerOwner.InertiaStateEntered(InteractionTracker sender, InteractionTrackerInertiaStateEnteredArgs args) { }
-    void IInteractionTrackerOwner.InteractingStateEntered(InteractionTracker sender, InteractionTrackerInteractingStateEnteredArgs args) { }
-    void IInteractionTrackerOwner.RequestIgnored(InteractionTracker sender, InteractionTrackerRequestIgnoredArgs args) { }
+    private void OnInertia()
+    {
+        if (!_inertiaRunning) return;
+
+        var now = DateTimeOffset.Now;
+        var dt = (now - _lastInertiaTime).TotalMilliseconds;
+        _lastInertiaTime = now;
+        if (dt <= 0) return;
+
+        var decay = Math.Pow(0.95, dt / 16.0);
+        _velocityX *= decay;
+        _velocityY *= decay;
+
+        var rx = _viewRotationX + _velocityX * dt;
+        var ry = _viewRotationY + _velocityY * dt;
+
+        if (rx > 1.0) rx -= 1.0;
+        if (rx < 0.0) rx += 1.0;
+        ry = Math.Clamp(ry, 0.01, 0.99);
+
+        _viewRotationX = (float)rx;
+        _viewRotationY = (float)ry;
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            _isParamsUpdatting = true;
+            RotationX = rx;
+            RotationY = ry;
+            _isParamsUpdatting = false;
+        });
+
+        if (Math.Sqrt(_velocityX * _velocityX + _velocityY * _velocityY) < 0.0000005)
+        {
+            StopInertia();
+        }
+    }
+
+    /// <summary>停止帧循环惯性。回到 UI 线程按需关闭渲染循环。</summary>
+    private void StopInertia()
+    {
+        _inertiaRunning = false;
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (!IsPlaying)
+                _canvas!.Paused = true;
+        });
+    }
 
     #endregion
 }

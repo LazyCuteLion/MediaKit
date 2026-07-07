@@ -62,6 +62,7 @@
             <Button Command="{x:Bind panoPlayer.PauseCommand}" Content="暂停" />
             <Button Command="{x:Bind panoPlayer.StopCommand}" Content="停止" />
             <Button Command="{x:Bind panoPlayer.ResetCommand}" Content="重置" />
+            <Button Click="Button_Click" Content="全屏"/>
         </StackPanel>
 
 
