@@ -1,4 +1,4 @@
-﻿# SkSL 着色器约定
+# SkSL 着色器约定
 
 
 ## 项目配置
@@ -52,7 +52,7 @@ uniform shader iImage;
 uniform float2 iImageSize;   // 自动填 iImage 的像素尺寸
 ```
 
-只在需要时声明；不声明就不填。声明顺序不影响识别（`fooSize` 写在 `foo` 之前也认得）。
+只在需要时声明；不声明就不填。声明顺序不影响识别（`fooSize` 写在 `foo` 之前也可）。
 伴生名不能再标 `@property`，也不能是 `float2` 以外的类型，否则报 `SKSL008`。
 
 对 `@surface` 而言表面尺寸恒等于视口尺寸，直接用 `iResolution` 即可，不必声明伴生名。
@@ -67,11 +67,6 @@ uniform float2 iImageSize;   // 自动填 iImage 的像素尺寸
 |---------|------|------|
 | `iResolution` | `float2` | 视口设备像素尺寸 |
 | `iTime` | `float` | 动画已播放秒数（需配合 `@animate`） |
-
-只有这两个是保留名。`iImage` **不是**保留名 —— 它只是历史上惯用的纹理名，
-和其他 `uniform shader` 一样必须自己标 `@surface` 或 `@texture`，改叫什么都行。
-
-一个 `uniform shader` 都不声明的着色器就是纯生成式效果（如 `Clouds`、`Pyramid`）。
 
 ---
 
@@ -140,8 +135,7 @@ pano.Image = new Uri(path);      // 属性名由 iImage 推导
 ShaderEffect.SetEffect(panel, pano);
 ```
 
-> `@effect: default` 不生成类，自然也没有属性可以喂图，所以它**不能**和 `@texture` 同时用（报 `SKSL009`）。
-> 只用 `@surface` 或不用纹理时才能用 `default` 形态。
+> `@effect: default` 只是简单的**自生成**着色器，**不能**使用 `@texture`（报 `SKSL009`）。
 
 ---
 
@@ -152,34 +146,15 @@ ShaderEffect.SetEffect(panel, pano);
 | | `ShaderPainter`（默认） | `ShaderEffect`（带 `@surface`） |
 |---|---|---|
 | 定位 | 自己画像素 | 拿别人画好的像素再加工 |
-| 纹理来源 | 全部由 `@texture` 属性喂图；不声明则纯生成式 | 其中一个 slot 取目标控件的表面快照 |
+| 纹理来源 | 由 `@texture` 标记纹理；不声明则纯生成式 | `@surface` 取目标控件的表面快照 |
 | 对目标控件的副作用 | 无 | attach 时开启 `BitmapCache` |
-| 典型用途 | Clouds、Pyramid、Pano | Ripple、Heartfelt |
+| 典型用途 | 动态背景、360全景图 | 水波纹特效（点击交互）、雨打玻璃窗效果 |
 
-两者共用同一个 `ShaderRenderer`；哪个 slot 取表面、哪个取图片，是渲染时读 sksl 标记得出的，
-不靠类型区分。`@surface` 和 `@texture` 也可以同时存在（拿控件快照叠一张贴图），
-不过仓库里目前没有这样的着色器，这条组合路径尚未实跑验证过。
 
-### 为什么要分开
+### 为什么 ShaderEffect 要占用目标控件的 CacheMode
 
-`ShaderEffect` 这个名字在两个框架里都严格是「后置加工」语义：Avalonia 的 `Avalonia.Media.Effects.Effect`
-（`BlurEffect` / `DropShadowEffect`）、WPF 的 `System.Windows.Media.Effects.ShaderEffect`，都只用于控件表面后处理。
-自生成着色器套用这个名字会和框架惯例相悖，所以自绘的那一半另起 `ShaderPainter`，
-`ShaderEffect` 只留给真正读取目标像素的场景。
-
-### 为什么 ShaderEffect 要占用目标的 CacheMode
-
-因为要拿到目标子树**在父级合成之前**的像素。开启 `BitmapCache` 后，lease 出的 `SKSurface`
-变成目标子树的隔离离屏 layer，快照取到的是 alpha 正确的干净像素；不开的话，半透明目标
-会把底下父级的颜色一起串进快照，加工结果就错了。
-
-侵入是有边界的：
-
-- attach 时若 `target.CacheMode != null`，**不抢**——尊重调用方已有的缓存策略；
-- detach 时只还原自己设的那一份（内部 `_ownsCacheMode` 标记），不会把别人的 `CacheMode` 清掉。
-
-> 实现上有个坑：`CacheModeProperty` 不在 `AffectsRender` 列表里，赋值后必须主动
-> `InvalidateVisual()`，才能把变更同步到合成树。
+因为要拿到目标控件**独立**像素。开启 `BitmapCache` 后，lease 出的 `SKSurface`
+就是目标控件的独立离屏表面，快照取到的是 alpha 正确的干净像素；不开的话，取得的是**整个窗口表面**。
 
 ---
 
@@ -246,4 +221,4 @@ half4 main(float2 fragCoord) {
 | `SKSL006` | Error | `@texture` 推导或指定的属性名不可用（非法标识符、与其他属性冲突） |
 | `SKSL007` | Warning | `@surface` 后面的名字被忽略 |
 | `SKSL008` | Error | 伴生尺寸 uniform 用法错误（类型不是 `float2`，或多标了 `@property`） |
-| `SKSL009` | Error | `@effect: default` 下用了 `@texture`，没有属性可以喂图 |
+| `SKSL009` | Error | `@effect: default` 下用了 `@texture`，不支持纹理采集 |
