@@ -1,16 +1,14 @@
 // @effect: RippleEffect
+// @surface
 uniform shader iImage;
 uniform float2 iResolution;
-uniform float2 iSourceSize;
 uniform float iTime;
-// @property: 0.0, 0.0, -10.0
-uniform float3 iRipple0; // (centerX, centerY, startTime)
-// @property: 0.0, 0.0, -10.0
-uniform float3 iRipple1;
-// @property: 0.0, 0.0, -10.0
-uniform float3 iRipple2;
-// @property: 0.0, 0.0, -10.0
-uniform float3 iRipple3;
+// 每个矩阵的一列是一处波纹 (centerX, centerY, startTime)，共 3×3 = 9 圈并存。
+// startTime = -10 表示空槽（早于任何真实波纹）。
+// 不标 @property：这些是渲染侧的内部槽位，不映射成依赖属性。
+uniform float3x3 iRipple0;
+uniform float3x3 iRipple1;
+uniform float3x3 iRipple2;
 // @property: 0.1
 uniform float amplitude;
 // @property: 50.0
@@ -54,20 +52,23 @@ float3 calcRippleWithReflection(float2 uv, float2 center, float age, float aspec
     return result;
 }
 
+// 一个矩阵里 3 列的合成。常量下标展开，不依赖动态索引。
+float3 sumSlots(float2 uv, float3x3 slots, float aspectRatio) {
+    return calcRippleWithReflection(uv, slots[0].xy, iTime - slots[0].z, aspectRatio)
+         + calcRippleWithReflection(uv, slots[1].xy, iTime - slots[1].z, aspectRatio)
+         + calcRippleWithReflection(uv, slots[2].xy, iTime - slots[2].z, aspectRatio);
+}
+
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord / iResolution;
     float aspectRatio = iResolution.x / iResolution.y;
 
-    float3 r0 = calcRippleWithReflection(uv, iRipple0.xy, iTime - iRipple0.z, aspectRatio);
-    float3 r1 = calcRippleWithReflection(uv, iRipple1.xy, iTime - iRipple1.z, aspectRatio);
-    float3 r2 = calcRippleWithReflection(uv, iRipple2.xy, iTime - iRipple2.z, aspectRatio);
-    float3 r3 = calcRippleWithReflection(uv, iRipple3.xy, iTime - iRipple3.z, aspectRatio);
+    float3 acc = sumSlots(uv, iRipple0, aspectRatio)
+               + sumSlots(uv, iRipple1, aspectRatio)
+               + sumSlots(uv, iRipple2, aspectRatio);
 
-    float2 offset = r0.xy + r1.xy + r2.xy + r3.xy;
-    float lighting = r0.z + r1.z + r2.z + r3.z;
-
-    half4 color = iImage.eval((uv + offset) * iSourceSize);
-    color.rgb *= (1.0 - lighting);
+    half4 color = iImage.eval((uv + acc.xy) * iResolution);
+    color.rgb *= (1.0 - acc.z);
     return color;
 }
 

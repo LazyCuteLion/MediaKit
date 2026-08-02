@@ -21,6 +21,11 @@ public partial class MainWindow : Window
         effectList.ItemsSource = ShaderEffectConverter.Names;
     }
 
+    private void BtnInvertProbe_Click(object? sender, RoutedEventArgs e)
+    {
+        new InvertProbeWindow().Show(this);
+    }
+
     private async void BtnOpen_Click(object? sender, RoutedEventArgs e)
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -41,16 +46,17 @@ public partial class MainWindow : Window
         if (_filePath.EndsWith(".sksl", StringComparison.OrdinalIgnoreCase))
         {
             ApplyEffect(null);
-            var effect = new ShaderEffect(new Uri(_filePath));
+            // 任意文件统一按自生成处理；若该着色器靠目标像素取源，attach 时会报明确的错
+            var effect = new ShaderPainter(new Uri(_filePath));
             ShaderEffect.SetEffect(rect, effect);
             effect.StartAnimation();
             return;
         }
 
         var current = ShaderEffect.GetEffect(rect);
-        if (current is PanoEffect)
+        if (current is PanoEffect pano)
         {
-            current.Input = new Uri(_filePath);
+            pano.Image = new Uri(_filePath);
         }
         else
         {
@@ -94,7 +100,7 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() =>
             {
                 rect.Fill = Brushes.Black;
-                var pano = new PanoEffect { Input = new Uri(path) };
+                var pano = new PanoEffect { Image = new Uri(path) };
                 ShaderEffect.SetEffect(rect, pano);
             });
         }

@@ -34,12 +34,19 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Button Grid.Column="1"
-                        Margin="10,0"
-                        Padding="12,4"
-                        VerticalAlignment="Center"
-                        Click="BtnOpen_Click"
-                        Content="Open" />
+                <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto">
+                    <Button Margin="10,0,0,0"
+                            Padding="12,4"
+                            VerticalAlignment="Center"
+                            Click="BtnInvertProbe_Click"
+                            Content="串色验证" />
+                    <Button Grid.Column="1"
+                            Margin="10,0"
+                            Padding="12,4"
+                            VerticalAlignment="Center"
+                            Click="BtnOpen_Click"
+                            Content="Open" />
+                </Grid>
             </Grid>
         </Grid>
 

@@ -1,0 +1,76 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MediaKit.Avalonia.Demo.InvertProbeWindow"
+        Title="CacheMode 串色验证（反色）"
+        Width="1000" Height="700">
+
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="12">
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="三块面板底色相同（半透明红 #7DFF0000 叠在绿色父级上）。① 原图无效果；② 挂 MediaKit 的反色效果（amount=1）；③ 两个参考色板，分别是「隔离层正确结果」与「串入父级绿色的错误结果」的算出色值。判定只看面板四周那圈没有子级压着的半透明底色带：② 的底色带贴近 ③ 上半块（青绿）= 串色已修复；贴近 ③ 下半块（浅蓝）= 仍在从整窗表面取像素。" />
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,12,*,12,220" Background="Green">
+
+            <!-- ① 原图，不挂效果 -->
+            <Border Grid.Column="0"
+                    BorderBrush="#3B82F6" BorderThickness="2" CornerRadius="20"
+                    Background="#7DFF0000" Padding="26">
+                <Border Background="#DBEAFE" CornerRadius="4" Padding="10" VerticalAlignment="Center">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="① 原图（无效果）" FontWeight="Bold" FontSize="15" Foreground="#1D4ED8" />
+                        <TextBlock Text="嵌套子级 A" />
+                        <TextBlock Text="嵌套子级 B" />
+                        <Rectangle Width="120" Height="40" Fill="#60A5FA" RadiusX="4" RadiusY="4" />
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- ② 挂 MediaKit 反色效果的目标 -->
+            <Border Grid.Column="2" x:Name="TargetPanel"
+                    BorderBrush="#3B82F6" BorderThickness="2" CornerRadius="20"
+                    Background="#7DFF0000" Padding="26">
+                <Border Background="#DBEAFE" CornerRadius="4" Padding="10" VerticalAlignment="Center">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="② 反色效果" FontWeight="Bold" FontSize="15" Foreground="#1D4ED8" />
+                        <TextBlock Text="嵌套子级 A" />
+                        <TextBlock Text="嵌套子级 B" />
+                        <Rectangle Width="120" Height="40" Fill="#60A5FA" RadiusX="4" RadiusY="4" />
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- ③ 参考色板 -->
+            <Grid Grid.Column="4" RowDefinitions="*,*" Margin="0,0,4,0">
+                <Border Grid.Row="0" Background="#00BE7D">
+                    <StackPanel VerticalAlignment="Center" Margin="10" Spacing="4">
+                        <TextBlock Text="正确（隔离层）" FontWeight="Bold" />
+                        <TextBlock Text="#00BE7D" />
+                        <TextBlock Text="半透明红反色成青，再叠绿底" TextWrapping="Wrap" FontSize="11" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Background="#82BEFF">
+                    <StackPanel VerticalAlignment="Center" Margin="10" Spacing="4">
+                        <TextBlock Text="错误（串入父级色）" FontWeight="Bold" />
+                        <TextBlock Text="#82BEFF" />
+                        <TextBlock Text="红已叠绿底后再反色" TextWrapping="Wrap" FontSize="11" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10"
+                    Margin="0,10,0,6" VerticalAlignment="Center">
+            <CheckBox x:Name="EffectToggle" Content="启用效果" IsChecked="True"
+                      IsCheckedChanged="EffectToggle_IsCheckedChanged" />
+            <TextBlock Text="反色强度" VerticalAlignment="Center" Margin="8,0,0,0" />
+            <Slider x:Name="AmountSlider" Width="240" Minimum="0" Maximum="1" Value="1"
+                    VerticalAlignment="Center" ValueChanged="AmountSlider_ValueChanged" />
+            <TextBlock x:Name="AmountText" VerticalAlignment="Center" Width="40" />
+            <Button Content="重挂效果（测 Detach 还原）" Click="Reattach_Click" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" x:Name="StatusText" TextWrapping="Wrap" FontSize="12"
+                   Foreground="#555555"
+                   Text="amount 拖到 0 时，② 应与 ① 完全一致（恒等）。注意：Debug 构建下 ShaderEffect 会在效果区左上角画一个随机色小方块并打 FPS 日志，那是内置调试代码，不是渲染错误。" />
+    </Grid>
+</Window>

@@ -1,7 +1,8 @@
 // @effect: PanoEffect
+// @texture
 uniform shader iImage;
 uniform float2 iResolution;
-uniform float2 iSourceSize;
+uniform float2 iImageSize;
 // @property: 0.5
 uniform float rotationX;
 // @property: 0.5
@@ -42,5 +43,5 @@ half4 main(float2 fragCoord) {
     float3 rd = normalize(rotateXY(camDir, camRot.yx));
     float2 texCoord = float2(atan(rd.z, rd.x) + PI, acos(-rd.y)) / float2(2.0 * PI, PI);
 
-    return iImage.eval(texCoord * iSourceSize);
+    return iImage.eval(texCoord * iImageSize);
 }
