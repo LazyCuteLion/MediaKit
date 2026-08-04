@@ -74,7 +74,7 @@ uniform float2 iImageSize;   // 自动填 iImage 的像素尺寸
 
 ### @effect: default（轻量注册）
 
-适合**纯展示型**着色器，不需要从 C# 暴露属性绑定。框架在 `ModuleInitializer` 中自动将其注册到 `ShaderEffectConverter` 工厂。
+适合**纯展示型**着色器，不需要从 C# 暴露属性绑定。框架在 `ModuleInitializer` 中自动将其注册到 `ShaderEffect` 工厂。
 
 ```glsl
 // @effect: default
@@ -98,7 +98,7 @@ public static class ShaderEffects
 
 使用：
 ```csharp
-ShaderEffect.SetEffect(panel, ShaderEffects.Clouds.Create());
+panel.Effect = ShaderEffects.Clouds.Create();
 ```
 
 ### @effect: ClassName（强类型子类）
@@ -132,26 +132,43 @@ half4 main(float2 fragCoord) {
 ```csharp
 var pano = ShaderEffects.Pano.Create();
 pano.Image = new Uri(path);      // 属性名由 iImage 推导
-ShaderEffect.SetEffect(panel, pano);
+panel.Effect = pano;
 ```
 
 > `@effect: default` 只是简单的**自生成**着色器，**不能**使用 `@texture`（报 `SKSL009`）。
 
 ---
 
-## 两种基类：ShaderPainter 与 ShaderEffect
+## 基类 ShaderEffect
 
-文件里有没有 `@surface` 决定生成的类继承谁。
+所有生成的效果类都继承 `ShaderEffect`。该类实现 `Avalonia.Media.IEffect`，通过 `Visual.EffectProperty.Changed` 自动 Attach/Detach。
 
-| | `ShaderPainter`（默认） | `ShaderEffect`（带 `@surface`） |
+使用方式：
+```csharp
+control.Effect = new PanoEffect();
+control.Effect = null; // 移除
+```
+
+### 与 Avalonia effect 管线的关系
+
+`ShaderEffect` 实现 `IEffect` 接口，因此可以赋值给 `Visual.Effect`。但 Avalonia 的 effect 管线（`ToImmutable` / `PushEffect`）只为 blur / drop-shadow 设计，自定义 effect 会触发异常或黑屏。
+
+本项目通过 Harmony 运行时修补 `EffectExtensions.ToImmutable` 和 `EffectExtensions.EffectEquals`，使 `ShaderEffect` 在 effect 管线中"隐形"：
+- `ToImmutable(ShaderEffect)` → 返回 `null`，不进入离屏层
+- `EffectEquals(null, ShaderEffect)` → 返回 `true`，避免每帧重复赋值
+
+因此 `ShaderEffect` 的渲染完全由 `CompositionCustomVisual` 独立负责，不依赖 Avalonia 的 effect 管线。
+
+### 纹理来源与副作用
+
+| 纹理来源 | 对目标控件的副作用 | 典型用途 |
 |---|---|---|
-| 定位 | 自己画像素 | 拿别人画好的像素再加工 |
-| 纹理来源 | 由 `@texture` 标记纹理；不声明则纯生成式 | `@surface` 取目标控件的表面快照 |
-| 对目标控件的副作用 | 无 | attach 时开启 `BitmapCache` |
-| 典型用途 | 动态背景、360全景图 | 水波纹特效（点击交互）、雨打玻璃窗效果 |
+| `@surface` | attach 时开启 `BitmapCache`，detach 时还原 | 水波纹、雨打玻璃等后置加工效果 |
+| `@texture` 标记纹理 | 无 | 全景图、自定义背景等自生成效果 |
+| 不声明 | 无 | 纯生成式着色器（动态背景等） |
 
 
-### 为什么 ShaderEffect 要占用目标控件的 CacheMode
+### 为什么带 @surface 的效果要占用目标控件的 CacheMode
 
 因为要拿到目标控件**独立**像素。开启 `BitmapCache` 后，lease 出的 `SKSurface`
 就是目标控件的独立离屏表面，快照取到的是 alpha 正确的干净像素；不开的话，取得的是**整个窗口表面**。

@@ -581,8 +581,7 @@ internal static class AvaloniaEmitter
         return sb.ToString();
     }
 
-    private static string GetBaseClass(bool requiresSurface)
-        => requiresSurface ? "ShaderEffect" : "ShaderPainter";
+    private static string GetBaseClass(bool requiresSurface) => "ShaderEffect";
 
     private static string GetCSharpType(string skslType)
     {
@@ -681,7 +680,7 @@ internal static class AvaloniaEmitter
         foreach (var reg in registers)
         {
             var animateStr = reg.Animate ? ", animate: true" : "";
-            sb.AppendLine($"    public static EffectDescriptor {reg.Name} {{ get; }} = new(\"{reg.Name}\", static () => new {GetBaseClass(reg.RequiresSurface)}(new Uri(\"avares://MediaKit.Avalonia/Shaders/{reg.FileName}.sksl\")){animateStr});");
+            sb.AppendLine($"    public static EffectDescriptor {reg.Name} {{ get; }} = new(\"{reg.Name}\", static () => new ShaderEffect(new Uri(\"avares://MediaKit.Avalonia/Shaders/{reg.FileName}.sksl\")){animateStr});");
         }
 
         sb.AppendLine("}");
@@ -704,10 +703,10 @@ internal static class AvaloniaEmitter
         sb.AppendLine("    {");
 
         foreach (var e in effects)
-            sb.AppendLine($"        ShaderEffectConverter.Register(ShaderEffects.{e.EffectDisplayName});");
+            sb.AppendLine($"        ShaderEffect.Register(ShaderEffects.{e.EffectDisplayName});");
 
         foreach (var reg in registers)
-            sb.AppendLine($"        ShaderEffectConverter.Register(ShaderEffects.{reg.Name});");
+            sb.AppendLine($"        ShaderEffect.Register(ShaderEffects.{reg.Name});");
 
         sb.AppendLine("    }");
         sb.AppendLine("}");

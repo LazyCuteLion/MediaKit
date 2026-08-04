@@ -110,7 +110,7 @@
             sb.AppendLine("//");
             sb.AppendLine("// internal sealed class " + className + "Renderer : ShaderRenderer");
             sb.AppendLine("// {");
-            sb.AppendLine("//     internal " + className + "Renderer(ShaderPainter owner, string sksl,");
+            sb.AppendLine("//     internal " + className + "Renderer(ShaderEffect owner, string sksl,");
             sb.AppendLine("//         Dictionary<string, object> uniforms, Dictionary<string, Uri?> textures)");
             sb.AppendLine("//         : base(owner, sksl, uniforms, textures) { }");
             sb.AppendLine("//");

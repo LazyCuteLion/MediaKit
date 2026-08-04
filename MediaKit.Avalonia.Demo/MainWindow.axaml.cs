@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         this.RendererDiagnostics.DebugOverlays = RendererDebugOverlays.Fps;
-        effectList.ItemsSource = ShaderEffectConverter.Names;
+        effectList.ItemsSource = ShaderEffect.Names;
     }
 
     private void BtnInvertProbe_Click(object? sender, RoutedEventArgs e)
@@ -47,19 +47,20 @@ public partial class MainWindow : Window
         {
             ApplyEffect(null);
             // 任意文件统一按自生成处理；若该着色器靠目标像素取源，attach 时会报明确的错
-            var effect = new ShaderPainter(new Uri(_filePath));
-            ShaderEffect.SetEffect(rect, effect);
+            var effect = new ShaderEffect(new Uri(_filePath));
+            rect.Effect = effect;
             effect.StartAnimation();
             return;
         }
 
-        var current = ShaderEffect.GetEffect(rect);
+        var current = rect.Effect;
         if (current is PanoEffect pano)
         {
             pano.Image = new Uri(_filePath);
         }
         else
         {
+            rect.Background = CreateFill();
             ApplyEffect(_selectedEffectName);
         }
     }
@@ -77,7 +78,7 @@ public partial class MainWindow : Window
 
     private void ApplyEffect(string? name)
     {
-        ShaderEffect.SetEffect(rect, null);
+        rect.Effect = null;
         PanelVR.IsVisible = false;
         PanelRipple.IsVisible = false;
 
@@ -99,28 +100,28 @@ public partial class MainWindow : Window
             var path = _filePath;
             Dispatcher.UIThread.Post(() =>
             {
-                rect.Fill = Brushes.Black;
+                rect.Background = Brushes.Black;
                 var pano = new PanoEffect { Image = new Uri(path) };
-                ShaderEffect.SetEffect(rect, pano);
+                rect.Effect = pano;
             });
         }
         else if (string.Equals(name, "Ripple", StringComparison.OrdinalIgnoreCase))
         {
             if (_filePath == null)
-                rect.Fill = Brushes.Gray;
+                rect.Background = Brushes.Gray;
             else
-                rect.Fill = CreateFill();
+                rect.Background = CreateFill();
             var ripple = new RippleEffect();
-            ShaderEffect.SetEffect(rect, ripple);
+            rect.Effect = ripple;
             PanelRipple.IsVisible = true;
             rightPanel.Width = 204;
         }
         else
         {
             rightPanel.Width = 0;
-            var effect = ShaderEffectConverter.Create(name);
+            var effect = ShaderEffect.Create(name);
             if (effect != null)
-                ShaderEffect.SetEffect(rect, effect);
+                rect.Effect = effect;
         }
     }
 
@@ -130,4 +131,6 @@ public partial class MainWindow : Window
         using var stream = File.OpenRead(_filePath!);
         return new ImageBrush(Bitmap.DecodeToWidth(stream, width)) { Stretch = Stretch.Uniform };
     }
+
+    
 }

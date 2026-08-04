@@ -76,7 +76,7 @@ internal sealed class RippleRenderer : ShaderRenderer
 
     private float _duration = 3f;
 
-    internal RippleRenderer(ShaderPainter owner, string sksl, Dictionary<string, object> uniforms,
+    internal RippleRenderer(ShaderEffect owner, string sksl, Dictionary<string, object> uniforms,
         Dictionary<string, Uri?> textures)
         : base(owner, sksl, uniforms, textures)
     {

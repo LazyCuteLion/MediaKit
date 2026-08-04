@@ -19,7 +19,7 @@ internal sealed record SetTextureMessage(string Name, Uri? Source);
 /// <summary>
 /// 渲染器，运行在合成线程，独占着色器编译产物、uniform 值与全部 GPU 资源。
 /// <para>
-/// 与 <see cref="ShaderPainter"/> 之间没有共享可变状态：初始参数经构造入参一次性交接，
+/// 与 <see cref="ShaderEffect"/> 之间没有共享可变状态：初始参数经构造入参一次性交接，
 /// 后续变更经 <see cref="CompositionCustomVisual.SendHandlerMessage"/> 单向送入；
 /// 回写 UI 一律经 <see cref="Dispatcher.UIThread"/> 投递，不等它执行。
 /// </para>
@@ -39,7 +39,7 @@ internal class ShaderRenderer : CompositionCustomVisualHandler
     /// 一个对象收口 <see cref="SKRuntimeEffect"/>、uniform 与 children，三者必然同源。
     /// </summary>
     private readonly SKRuntimeShaderBuilder _builder;
-    private readonly ShaderPainter _owner;
+    private readonly ShaderEffect _owner;
 
     /// <summary>按 sksl 声明顺序排列，数量是个位数，按名字线性查找即可。</summary>
     private readonly List<TextureSlot> _textures = new();
@@ -60,10 +60,10 @@ internal class ShaderRenderer : CompositionCustomVisualHandler
     protected double Elapsed => _clock.Elapsed.TotalSeconds;
 
     /// <remarks>
-    /// 由 <see cref="ShaderPainter.CreateRenderer"/> 在 <b>UI 线程</b>调用，因此着色器编译失败与
+    /// 由 <see cref="ShaderEffect.CreateRenderer"/> 在 <b>UI 线程</b>调用，因此着色器编译失败与
     /// 标记误用的异常会直接冒泡到 attach 调用点，堆栈清晰且 DEBUG / Release 行为一致。
     /// </remarks>
-    internal ShaderRenderer(ShaderPainter owner, string sksl, Dictionary<string, object> uniforms,
+    internal ShaderRenderer(ShaderEffect owner, string sksl, Dictionary<string, object> uniforms,
         Dictionary<string, Uri?> textures)
     {
         _owner = owner;
@@ -378,6 +378,9 @@ internal class ShaderRenderer : CompositionCustomVisualHandler
 
             slot.Image = surface.Snapshot();
             if (slot.Image == null) return null;
+            //using var data = slot.Image.Encode(SKEncodedImageFormat.Png, 100);
+            //using var file = File.Create("ttt.png");
+            //data.SaveTo(file);
 
             slot.Shader = slot.Image.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp);
             slot.Width = deviceW;

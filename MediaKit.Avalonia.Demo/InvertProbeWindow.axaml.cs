@@ -18,13 +18,15 @@ public partial class InvertProbeWindow : Window
     private void AttachEffect()
     {
         _effect = new InvertEffect { Amount = AmountSlider.Value };
-        ShaderEffect.SetEffect(TargetPanel, _effect);
+        TargetPanel.Effect = _effect;
+        //_effect.Attach(TargetPanel);
         UpdateStatus();
     }
 
     private void DetachEffect()
     {
-        ShaderEffect.SetEffect(TargetPanel, null);
+        TargetPanel.Effect = null;
+        //_effect?.Detach();
         _effect = null;
         UpdateStatus();
     }
