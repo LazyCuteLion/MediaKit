@@ -26,6 +26,14 @@
     <HlslShader Include="Shaders\*.fx" />
   </ItemGroup>
 
+  <!-- 清理 Shaders\Compiled 下没有对应 .fx 的孤立 .ps 产物 -->
+  <Target Name="CleanOrphanedPsFiles" BeforeTargets="CompileShaders">
+    <ItemGroup>
+      <_compiledPs Include="$(ProjectDir)Shaders\Compiled\*.ps" />
+    </ItemGroup>
+    <Delete Files="@(_compiledPs)" Condition="!Exists('$(ProjectDir)Shaders\%(Filename).fx')" />
+  </Target>
+
   <!-- .fx → Compiled\{文件名}.ps (ps_3_0)：按文件名自动派生输出，增量编译 -->
   <Target Name="CompileShaders" BeforeTargets="RegisterCompiledShaders" Inputs="@(HlslShader)" Outputs="@(HlslShader->'$(ProjectDir)Shaders\Compiled\%(Filename).ps')" Condition="Exists('$(FxcPath)')">
     <MakeDir Directories="$(ProjectDir)Shaders\Compiled" />

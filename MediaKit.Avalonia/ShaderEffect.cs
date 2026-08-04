@@ -213,6 +213,7 @@ public class ShaderEffect : AvaloniaObject, IEffect
 
     public void Attach(Control target)
     {
+        if (Target != null) return; // 已附加，避免事件重复订阅
         Target = target;
 
         // 开启位图缓存：lease 出的 SKSurface 变为「目标子树的隔离离屏 layer」，

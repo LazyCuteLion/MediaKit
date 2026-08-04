@@ -127,13 +127,13 @@ public partial class MainWindow : Window
         switch (tag)
         {
             case "bg1": { var fx = new Bg1Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            case "Thirteen": { var fx = new ThirteenEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            case "Pyramid": { var fx = new PyramidEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            case "Clouds": { var fx = new CloudsEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            case "Octgrams": { var fx = new OctgramsEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            case "PhantomStar": { var fx = new PhantomStarEffect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
-            // Heartfelt 采样输入图像（雨滴玻璃扭曲），挂到视频元素上更直观
-            case "Heartfelt": { var fx = new HeartfeltEffect(); fx.Attach(player); _detachBg = fx.Detach; break; }
+            case "bg2": { var fx = new Bg2Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "bg3": { var fx = new Bg3Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "bg4": { var fx = new Bg4Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "bg5": { var fx = new Bg5Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            case "bg6": { var fx = new Bg6Effect(); fx.Attach(bgLayer); _detachBg = fx.Detach; break; }
+            // GlassRain 采样输入图像（雨滴玻璃扭曲），挂到视频元素上更直观
+            case "GlassRain": { var fx = new GlassRainEffect(); fx.Attach(player); _detachBg = fx.Detach; break; }
             case "Ripple": { var fx = new RippleEffect(); fx.Attach(player); _detachBg = fx.Detach; break; }
         }
     }

@@ -34,9 +34,10 @@
                 continue;
 
             var fileName = Path.GetFileNameWithoutExtension(path);
+            // 文件名派生类名时首字母大写（与源生成器 Capitalize 对齐，bg1 → Bg1Effect）
             var className = !string.IsNullOrEmpty(markerVal)
                 ? markerVal
-                : fileName + "Effect";
+                : (fileName.Length > 0 ? char.ToUpperInvariant(fileName[0]) + fileName.Substring(1) : fileName) + "Effect";
 
             validClassNames.Add(className);
             if (!classToFiles.TryGetValue(className, out var list))

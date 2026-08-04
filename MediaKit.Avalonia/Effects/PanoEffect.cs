@@ -187,6 +187,11 @@ internal sealed class PanoRenderer : ShaderRenderer
         {
             _inertiaActive = false;
         }
+        else if (message is SetUniformMessage u && (u.Name == "rotationX" || u.Name == "rotationY"))
+        {
+            _inertiaActive = false;
+            base.OnMessage(message);
+        }
         else
         {
             base.OnMessage(message);

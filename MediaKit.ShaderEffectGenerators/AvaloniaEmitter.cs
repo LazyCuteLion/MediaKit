@@ -184,7 +184,7 @@ internal static class AvaloniaEmitter
                     // @effect: default → 仅注册为描述符，不生成强类型类
                     registerName = fileName;
                 else
-                    effectName = val ?? (fileName + "Effect");
+                    effectName = val ?? (fileName.Length > 0 ? char.ToUpperInvariant(fileName[0]) + fileName.Substring(1) : fileName) + "Effect";
                 continue;
             }
             if (line == "// @animate")

@@ -1,4 +1,4 @@
-﻿<Window x:Class="MediaKit.WPF.Demo.MainWindow"
+<Window x:Class="MediaKit.WPF.Demo.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:media="https://github.com/LazyCuteLion/MediaKit"
@@ -24,12 +24,12 @@
                        Text="背景效果：" />
             <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="None" Foreground="White" IsChecked="True" />
             <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg1" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Thirteen" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Pyramid" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Clouds" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Octgrams" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="PhantomStar" Foreground="White" />
-            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Heartfelt" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg2" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg3" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg4" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg5" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="bg6" Foreground="White" />
+            <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="GlassRain" Foreground="White" />
              <RadioButton Margin="4,0" Checked="BgEffect_Checked" Content="Ripple" Foreground="White" />
         </StackPanel>
         
